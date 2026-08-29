@@ -1,30 +1,43 @@
 import { io, Socket } from 'socket.io-client';
-import { Platform } from 'react-native';
+import { getBackendUrl } from '@/services/api';
 
-// Default localhost URL based on runtime platform (10.0.2.2 for Android emulator, localhost for iOS/web)
-const SERVER_URL =
-  Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://localhost:8000';
+type MessageListener = (data: any) => void;
 
 class SocketService {
   private socket: Socket | null = null;
+  private coachMessageListeners: MessageListener[] = [];
+
+  public isConnected(): boolean {
+    return Boolean(this.socket && this.socket.connected);
+  }
 
   public connect(userId: string): Socket {
     if (this.socket && this.socket.connected) {
       return this.socket;
     }
 
-    this.socket = io(SERVER_URL, {
+    const serverUrl = getBackendUrl();
+    console.log('🔌 [Socket.IO] Connecting to:', serverUrl);
+
+    this.socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
       autoConnect: true,
       auth: {
         userId,
       },
-      reconnectionAttempts: 5,
+      reconnection: true,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
+      timeout: 20000,
     });
 
     this.socket.on('connect', () => {
       console.log('✅ [Socket.IO] Connected to Clovo Server. ID:', this.socket?.id);
+    });
+
+    this.socket.on('coach_message', (data: any) => {
+      console.log('🤖 [Socket.IO] Received coach_message:', data);
+      this.coachMessageListeners.forEach((listener) => listener(data));
     });
 
     this.socket.on('disconnect', (reason) => {
@@ -36,6 +49,13 @@ class SocketService {
     });
 
     return this.socket;
+  }
+
+  public onCoachMessage(callback: MessageListener): () => void {
+    this.coachMessageListeners.push(callback);
+    return () => {
+      this.coachMessageListeners = this.coachMessageListeners.filter((cb) => cb !== callback);
+    };
   }
 
   public disconnect(): void {
@@ -50,7 +70,10 @@ class SocketService {
   }
 
   public emit(event: string, data: any): void {
-    if (this.socket && this.socket.connected) {
+    if (!this.socket || !this.socket.connected) {
+      this.connect('1');
+    }
+    if (this.socket) {
       this.socket.emit(event, data);
     }
   }

@@ -5,6 +5,7 @@ from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
     from models.conversation import Conversation, Message
+    from models.patient import Patient
 
 
 def generate_uuid() -> str:
@@ -24,6 +25,7 @@ class SafetyEvent(SQLModel, table=True):
     __tablename__ = "safety_events"
 
     id: str = Field(default_factory=generate_uuid, primary_key=True, index=True)
+    patient_id: Optional[int] = Field(default=None, foreign_key="patients.id", index=True)
     conversation_id: str = Field(foreign_key="conversations.id", index=True)
     message_id: Optional[str] = Field(default=None, foreign_key="messages.id", index=True)
     risk_level: str = Field(description="Risk severity: 'low', 'medium', 'high', 'critical'")
@@ -35,13 +37,3 @@ class SafetyEvent(SQLModel, table=True):
     # Relationships
     conversation: Optional["Conversation"] = Relationship(back_populates="safety_events")
     message: Optional["Message"] = Relationship(back_populates="safety_events")
-
-
-class SafetyEventCreate(SQLModel):
-    id: Optional[str] = None
-    conversation_id: str
-    message_id: Optional[str] = None
-    risk_level: str
-    trigger: str
-    action: str
-    status: str = "open"

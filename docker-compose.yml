@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # 1. Redis Service (Pub/Sub & Caching)
+  redis:
+    image: redis:7-alpine
+    container_name: clovo-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 2. FastAPI + Socket.IO Server
+  server:
+    build:
+      context: ./Server
+      dockerfile: Dockerfile
+    container_name: clovo-server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=development
+      - PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - SENTRY_DSN=${SENTRY_SERVER_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
+      - DATABASE_URL=sqlite:///./clovo.db
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./Server:/app
+      - server-data:/app/data
+
+volumes:
+  redis-data:
+  server-data:

@@ -1,5 +1,5 @@
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlmodel import Session
 
 from database import get_session
@@ -8,11 +8,13 @@ from services import recommendation_service
 
 router = APIRouter(tags=["Tasks"])
 
+SessionDep = Annotated[Session, Depends(get_session)]
+
 
 @router.get("/api/tasks", response_model=List[TaskItemData])
-async def get_tasks(
-    patient_id: Optional[str] = None,
-    session: Session = Depends(get_session),
+def get_tasks(
+    session: SessionDep,
+    patient_id: Annotated[Optional[int], Query(description="Optional patient ID")] = None,
 ) -> List[TaskItemData]:
     """
     Get daily tasks/preparations for the active user from the database.
@@ -21,9 +23,9 @@ async def get_tasks(
 
 
 @router.get("/api/users/{user_id}/tasks", response_model=List[TaskItemData])
-async def get_user_tasks(
-    user_id: str,
-    session: Session = Depends(get_session),
+def get_user_tasks(
+    user_id: Annotated[int, Path(ge=1, description="Unique user ID")],
+    session: SessionDep,
 ) -> List[TaskItemData]:
     """
     Get daily tasks for a specific user ID.
@@ -32,9 +34,9 @@ async def get_user_tasks(
 
 
 @router.patch("/api/tasks/{task_id}/toggle", response_model=Recommendation)
-async def toggle_task(
-    task_id: str,
-    session: Session = Depends(get_session),
+def toggle_task(
+    task_id: Annotated[int, Path(ge=1, description="Unique task ID")],
+    session: SessionDep,
 ) -> Recommendation:
     """
     Toggle task completion status in the database.

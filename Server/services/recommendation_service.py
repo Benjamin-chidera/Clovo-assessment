@@ -3,39 +3,73 @@ from sqlmodel import Session, select
 from models.recommendation import (
     Recommendation,
     TaskItemData,
-    RecommendationCreate,
-    RecommendationUpdate,
+    RecommendationRead,
 )
+from models.clinical_content import ClinicalContent
 
 
 class RecommendationService:
     @staticmethod
-    def get_by_patient(session: Session, patient_id: str) -> List[Recommendation]:
+    def get_by_patient(session: Session, patient_id: int) -> List[RecommendationRead]:
+        """
+        Fetch all recommendations for a patient joined with their ClinicalContent details.
+        """
         statement = (
-            select(Recommendation)
+            select(Recommendation, ClinicalContent)
+            .join(ClinicalContent, Recommendation.content_id == ClinicalContent.id)
             .where(Recommendation.patient_id == patient_id)
-            .order_by(Recommendation.created_at.asc())
+            .order_by(Recommendation.scheduled_date.asc())
         )
-        return list(session.exec(statement).all())
+        results = session.exec(statement).all()
+
+        return [
+            RecommendationRead(
+                id=rec.id,
+                patient_id=rec.patient_id,
+                content_id=rec.content_id,
+                title=content.title,
+                type=content.type,
+                description=content.description,
+                rationale=content.rationale,
+                image_url=content.image_url,
+                icon_name=content.icon_name,
+                duration_minutes=rec.duration_minutes,
+                repetitions=rec.repetitions,
+                scheduled_date=rec.scheduled_date,
+                status=rec.status,
+                notes=rec.notes,
+            )
+            for rec, content in results
+        ]
 
     @staticmethod
-    def get_by_id(session: Session, recommendation_id: str) -> Optional[Recommendation]:
+    def get_by_id(session: Session, recommendation_id: int) -> Optional[Recommendation]:
+        """Fetch raw Recommendation entity by integer ID."""
         return session.get(Recommendation, recommendation_id)
 
     @staticmethod
-    def get_tasks_for_user(session: Session, patient_id: Optional[str] = None) -> List[TaskItemData]:
+    def get_tasks_for_user(session: Session, patient_id: Optional[int] = None) -> List[TaskItemData]:
+        """
+        Return formatted task checklist for a patient for mobile tasks display.
+        """
         from services.patient_service import patient_service
 
         patient = patient_service.get_patient_by_id(session, patient_id) if patient_id else None
         if not patient:
             patient = patient_service.get_or_create_default_patient(session)
 
-        recs = RecommendationService.get_by_patient(session, patient.id)
+        statement = (
+            select(Recommendation, ClinicalContent)
+            .join(ClinicalContent, Recommendation.content_id == ClinicalContent.id)
+            .where(Recommendation.patient_id == patient.id)
+            .order_by(Recommendation.scheduled_date.asc())
+        )
+        results = session.exec(statement).all()
 
         def map_category(t: str) -> str:
             t_lower = t.lower()
-            if "walk" in t_lower:
-                return "walking"
+            if "exercise" in t_lower or "walk" in t_lower:
+                return "recovery"
             if "mind" in t_lower:
                 return "mindset"
             if "nutr" in t_lower or "hydr" in t_lower:
@@ -44,74 +78,47 @@ class RecommendationService:
 
         def map_label(t: str) -> str:
             t_lower = t.lower()
-            if "walk" in t_lower:
+            if "exercise" in t_lower:
                 return "Movement"
             if "mind" in t_lower:
                 return "Mindset"
             if "nutr" in t_lower:
                 return "Nutrition"
-            return "Daily Prep"
-
-        def map_duration(t: str) -> str:
-            t_lower = t.lower()
-            if "walk" in t_lower:
-                return "15 mins"
-            if "mind" in t_lower:
-                return "10 mins"
-            return "Daily"
+            return "Recovery Prep"
 
         return [
             TaskItemData(
-                id=r.id,
-                title=r.title,
-                category=map_category(r.type),
-                duration=map_duration(r.type),
-                is_completed=(r.status == "completed"),
-                category_label=map_label(r.type),
-                instruction=r.instruction,
-                rationale=r.rationale,
+                id=rec.id,
+                title=content.title,
+                category=map_category(content.type),
+                duration=f"{rec.duration_minutes} mins" if rec.duration_minutes else "10 mins",
+                is_completed=(rec.status == "completed"),
+                category_label=map_label(content.type),
+                instruction=content.description,
+                rationale=content.rationale,
+                image_url=content.image_url,
+                icon_name=content.icon_name,
+                repetitions=rec.repetitions,
+                notes=rec.notes,
             )
-            for r in recs
+            for rec, content in results
         ]
 
     @staticmethod
-    def create(session: Session, data: RecommendationCreate) -> Recommendation:
-        rec = Recommendation(
-            patient_id=data.patient_id,
-            type=data.type,
-            title=data.title,
-            instruction=data.instruction,
-            rationale=data.rationale,
-            content_id=data.content_id,
-            version=data.version,
-            status=data.status,
-        )
-        if data.id:
-            rec.id = data.id
-        session.add(rec)
+    def create(session: Session, recommendation: Recommendation) -> Recommendation:
+        """Create and persist a new personalized recommendation."""
+        session.add(recommendation)
         session.commit()
-        session.refresh(rec)
-        return rec
+        session.refresh(recommendation)
+        return recommendation
 
     @staticmethod
-    def toggle_status(session: Session, recommendation_id: str) -> Optional[Recommendation]:
+    def toggle_status(session: Session, recommendation_id: int) -> Optional[Recommendation]:
+        """Toggle recommendation status between 'active' and 'completed'."""
         rec = session.get(Recommendation, recommendation_id)
         if not rec:
             return None
-        rec.status = "completed" if rec.status != "completed" else "pending"
-        session.add(rec)
-        session.commit()
-        session.refresh(rec)
-        return rec
-
-    @staticmethod
-    def update(session: Session, recommendation_id: str, data: RecommendationUpdate) -> Optional[Recommendation]:
-        rec = session.get(Recommendation, recommendation_id)
-        if not rec:
-            return None
-        update_data = data.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(rec, key, value)
+        rec.status = "completed" if rec.status != "completed" else "active"
         session.add(rec)
         session.commit()
         session.refresh(rec)

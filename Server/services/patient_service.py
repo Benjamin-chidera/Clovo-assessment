@@ -1,13 +1,14 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional
 from sqlmodel import Session, select
 from models.patient import Patient, PatientHomeData, UserProfileData
 from models.recommendation import Recommendation, PreparationItem
+from models.clinical_content import ClinicalContent
 
 
 class PatientService:
     @staticmethod
-    def get_patient_by_id(session: Session, patient_id: str) -> Optional[Patient]:
+    def get_patient_by_id(session: Session, patient_id: int) -> Optional[Patient]:
         return session.get(Patient, patient_id)
 
     @staticmethod
@@ -17,14 +18,14 @@ class PatientService:
 
     @staticmethod
     def list_patients(session: Session) -> List[Patient]:
-        statement = select(Patient).order_by(Patient.created_at.asc())
+        statement = select(Patient).order_by(Patient.id.asc())
         return list(session.exec(statement).all())
 
     @staticmethod
     def get_or_create_default_patient(session: Session) -> Patient:
         """
         Retrieves or seeds the default patient (Sarah) with surgery scheduled 21 days away
-        and today's preparation task list.
+        and personalized recommendations linked to the clinical content library.
         """
         patient = PatientService.get_patient_by_name(session, "Sarah")
         if not patient:
@@ -32,7 +33,6 @@ class PatientService:
             procedure_date = now + timedelta(days=21)
 
             patient = Patient(
-                id="patient-sarah",
                 name="Sarah",
                 email="sarah@clovo.app",
                 avatar_uri="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80",
@@ -48,47 +48,47 @@ class PatientService:
             session.commit()
             session.refresh(patient)
 
-            # Seed Today's preparation tasks:
-            # 1. ✓ 15 min walking (completed)
-            # 2. ○ Mindfulness (pending)
-            # 3. ○ Nutrition goal (pending)
-            initial_preparations = [
+            # Seed Today's recommendations linked to ClinicalContent:
+            # 1. content_id=1: Quad Sets (completed)
+            # 2. content_id=4: 4-7-8 Breathing (active)
+            # 3. content_id=3: Protein Power Snack (active)
+            initial_recommendations = [
                 Recommendation(
-                    id="prep-walk-1",
                     patient_id=patient.id,
-                    type="walking",
-                    title="15 min walking",
-                    instruction="Maintain a steady, gentle pace for 15 minutes",
-                    rationale="Build endurance and pre-op cardiovascular health",
+                    content_id=1,
+                    duration_minutes=10,
+                    repetitions=10,
+                    scheduled_date=date.today(),
                     status="completed",
+                    notes="Completed in the morning",
                 ),
                 Recommendation(
-                    id="prep-mind-2",
                     patient_id=patient.id,
-                    type="mindfulness",
-                    title="Mindfulness",
-                    instruction="5 to 10 minutes of guided mindful breathing",
-                    rationale="Reduce stress and optimize nervous system recovery",
-                    status="pending",
+                    content_id=4,
+                    duration_minutes=5,
+                    repetitions=4,
+                    scheduled_date=date.today(),
+                    status="active",
+                    notes="Recommended before bedtime",
                 ),
                 Recommendation(
-                    id="prep-nutr-3",
                     patient_id=patient.id,
-                    type="nutrition",
-                    title="Nutrition goal",
-                    instruction="Meet protein intake and maintain hydration target",
-                    rationale="Supports cellular repair and tissue preparation",
-                    status="pending",
+                    content_id=3,
+                    duration_minutes=10,
+                    repetitions=None,
+                    scheduled_date=date.today(),
+                    status="active",
+                    notes="Mid-morning protein snack",
                 ),
             ]
-            for prep in initial_preparations:
-                session.add(prep)
+            for rec in initial_recommendations:
+                session.add(rec)
             session.commit()
 
         return patient
 
     @staticmethod
-    def get_user_profile(session: Session, patient_id: Optional[str] = None) -> UserProfileData:
+    def get_user_profile(session: Session, patient_id: Optional[int] = None) -> UserProfileData:
         """
         Retrieves formatted user profile for the current/selected patient from the database.
         """
@@ -126,12 +126,9 @@ class PatientService:
         )
 
     @staticmethod
-    def get_patient_home_data(session: Session, patient_id: Optional[str] = None) -> PatientHomeData:
+    def get_patient_home_data(session: Session, patient_id: Optional[int] = None) -> PatientHomeData:
         """
-        Calculates and returns home page dashboard data:
-        - Greeting: 'Good morning, Sarah'
-        - Surgery Countdown: '21 days away'
-        - Today's preparation items
+        Calculates and returns home page dashboard data with joined clinical content details.
         """
         patient: Optional[Patient] = None
         if patient_id:
@@ -144,7 +141,7 @@ class PatientService:
         if patient.procedure_date:
             now = datetime.now(timezone.utc)
             proc_date = patient.procedure_date
-            if proc_date.tzinfo is None: 
+            if proc_date.tzinfo is None:
                 proc_date = proc_date.replace(tzinfo=timezone.utc)
             days_diff = (proc_date.date() - now.date()).days
             days_away = max(0, days_diff)
@@ -153,23 +150,30 @@ class PatientService:
         time_greeting = "Good morning" if current_hour < 12 else "Good afternoon" if current_hour < 17 else "Good evening"
         greeting = f"{time_greeting}, {patient.name}"
 
+        # Join Recommendation with ClinicalContent
         rec_statement = (
-            select(Recommendation)
+            select(Recommendation, ClinicalContent)
+            .join(ClinicalContent, Recommendation.content_id == ClinicalContent.id)
             .where(Recommendation.patient_id == patient.id)
-            .order_by(Recommendation.created_at.asc())
+            .order_by(Recommendation.scheduled_date.asc())
         )
-        recommendations = session.exec(rec_statement).all()
+        results = session.exec(rec_statement).all()
 
         preparations = [
             PreparationItem(
                 id=rec.id,
-                title=rec.title,
+                title=content.title,
                 is_completed=(rec.status == "completed"),
-                type=rec.type,
-                instruction=rec.instruction,
-                rationale=rec.rationale,
+                type=content.type,
+                instruction=content.description,
+                rationale=content.rationale,
+                image_url=content.image_url,
+                icon_name=content.icon_name,
+                duration_minutes=rec.duration_minutes,
+                repetitions=rec.repetitions,
+                notes=rec.notes,
             )
-            for rec in recommendations
+            for rec, content in results
         ]
 
         return PatientHomeData(

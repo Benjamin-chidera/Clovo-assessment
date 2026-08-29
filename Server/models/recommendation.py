@@ -1,60 +1,67 @@
-from datetime import datetime, timezone
+from datetime import date
 from typing import Optional, TYPE_CHECKING
-import uuid
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import SQLModel, Field, Relationship
 
 if TYPE_CHECKING:
     from models.patient import Patient
-
-
-def generate_uuid() -> str:
-    """Generate a standard UUID string for primary keys."""
-    return str(uuid.uuid4())
-
-
-def get_utc_now() -> datetime:
-    """Return current UTC datetime."""
-    return datetime.now(timezone.utc)
+    from models.clinical_content import ClinicalContent
 
 
 class Recommendation(SQLModel, table=True):
     """
-    AI or coach generated recovery recommendations tailored to patient pathway.
+    Patient-specific prescription linking a patient to clinical content with custom duration, repetitions, and schedule.
+    Serves as the database table model and primary entity.
     """
     __tablename__ = "recommendations"
 
-    id: str = Field(default_factory=generate_uuid, primary_key=True, index=True)
-    patient_id: str = Field(foreign_key="patients.id", index=True)
-    type: str = Field(description="Activity type e.g., walking, mindfulness, nutrition")
-    title: str
-    instruction: Optional[str] = Field(default=None)
-    rationale: Optional[str] = Field(default=None)
-    content_id: Optional[str] = Field(default=None)
-    version: int = Field(default=1)
-    status: str = Field(default="pending", description="Status e.g. pending, completed, skipped")
-    created_at: datetime = Field(default_factory=get_utc_now)
+    id: Optional[int] = Field(default=None, primary_key=True)
 
-    # Relationships
+    # Links to Patient (Who)
+    patient_id: int = Field(foreign_key="patients.id", index=True)
+
+    # Links to Clinical Content (The "What")
+    content_id: int = Field(foreign_key="clinical_content.id", index=True)
+
+    # Personalization (The "How Much")
+    duration_minutes: int = Field(default=10, description="Prescribed duration in minutes")
+    repetitions: Optional[int] = Field(default=None, description="Prescribed repetitions if applicable")
+
+    # Scheduling (The "When")
+    scheduled_date: date = Field(default_factory=date.today, index=True)
+
+    # State & Lifecycle
+    status: str = Field(default="active", index=True, description="active, completed, skipped")
+
+    # Optional specific notes for this patient
+    notes: Optional[str] = Field(default=None, description="Custom clinical or coach notes")
+
+    # SQLModel Relationships
     patient: Optional["Patient"] = Relationship(back_populates="recommendations")
+    content: Optional["ClinicalContent"] = Relationship(back_populates="recommendations")
 
 
 class PreparationItem(SQLModel):
     """
-    Preparation item representation for UI checklist display.
+    Composite UI presentation DTO for home checklist display with joined content imagery.
     """
-    id: str
+    id: int
     title: str
     is_completed: bool
     type: str
     instruction: Optional[str] = None
     rationale: Optional[str] = None
+    image_url: Optional[str] = None
+    icon_name: Optional[str] = None
+    duration_minutes: int = 10
+    repetitions: Optional[int] = None
+    notes: Optional[str] = None
 
 
 class TaskItemData(SQLModel):
     """
-    Formatted daily task data model returned by task API.
+    Composite UI presentation DTO returned by /api/tasks with formatted labels and media.
     """
-    id: str
+    id: int
     title: str
     category: str
     duration: str
@@ -62,21 +69,27 @@ class TaskItemData(SQLModel):
     category_label: str
     instruction: Optional[str] = None
     rationale: Optional[str] = None
+    image_url: Optional[str] = None
+    icon_name: Optional[str] = None
+    repetitions: Optional[int] = None
+    notes: Optional[str] = None
 
 
-class RecommendationCreate(SQLModel):
-    id: Optional[str] = None
-    patient_id: str
-    type: str
+class RecommendationRead(SQLModel):
+    """
+    Composite read DTO joining Recommendation with ClinicalContent fields.
+    """
+    id: int
+    patient_id: int
+    content_id: int
     title: str
-    instruction: Optional[str] = None
-    rationale: Optional[str] = None
-    content_id: Optional[str] = None
-    version: int = 1
-    status: str = "pending"
-
-
-class RecommendationUpdate(SQLModel):
-    status: Optional[str] = None
-    instruction: Optional[str] = None
-    rationale: Optional[str] = None
+    type: str
+    description: str
+    rationale: str
+    image_url: Optional[str] = None
+    icon_name: Optional[str] = None
+    duration_minutes: int
+    repetitions: Optional[int] = None
+    scheduled_date: date
+    status: str
+    notes: Optional[str] = None

@@ -25,7 +25,7 @@ class Conversation(SQLModel, table=True):
     __tablename__ = "conversations"
 
     id: str = Field(default_factory=generate_uuid, primary_key=True, index=True)
-    patient_id: str = Field(foreign_key="patients.id", index=True)
+    patient_id: int = Field(foreign_key="patients.id", index=True)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(default_factory=get_utc_now)
 
@@ -50,9 +50,3 @@ class Message(SQLModel, table=True):
     # Relationships
     conversation: Optional["Conversation"] = Relationship(back_populates="messages")
     safety_events: List["SafetyEvent"] = Relationship(back_populates="message")
-
-
-class MessageCreate(SQLModel):
-    conversation_id: str
-    role: str
-    content: str

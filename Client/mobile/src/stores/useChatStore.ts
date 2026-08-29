@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { socketService } from '@/services/socketService';
+import { apiClient } from '@/services/api';
 
 export interface ActivityCard {
   id: string;
@@ -20,117 +21,131 @@ export interface ChatMessage {
   timestamp: string;
   options?: ActivityCard[];
   selectedOptionId?: string;
+  isSafetyAlert?: boolean;
+  riskLevel?: 'critical' | 'high' | 'medium' | 'low';
+  quickReplies?: string[];
 }
 
 export interface ChatState {
   messages: ChatMessage[];
+  isLoading: boolean;
+  isTyping: boolean;
   selectedCardId: string | null;
   quickReplies: string[];
-  sendMessage: (text: string, sender?: 'user' | 'coach') => void;
+  fetchMessages: (patientId?: number) => Promise<void>;
+  sendMessage: (text: string, patientId?: number) => Promise<void>;
   selectActivity: (card: ActivityCard) => void;
   addIncomingMessage: (message: ChatMessage) => void;
+  setQuickReplies: (replies: string[]) => void;
 }
 
-const INITIAL_ACTIVITY_CARDS: ActivityCard[] = [
-  {
-    id: 'card-stretch',
-    title: 'Gentle Stretching – Release Tension',
-    durationMinutes: 10,
-    durationLabel: '10 minutes',
-    intensity: 'Low',
-    imageUri: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&w=600&q=80',
-    tag: 'Stretching',
-  },
-  {
-    id: 'card-walk',
-    title: 'Recovery Walk – Shake Off Soreness',
-    durationMinutes: 30,
-    durationLabel: '30 minutes',
-    intensity: 'Low',
-    imageUri: 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&w=600&q=80',
-    tag: 'Outdoor Walk',
-  },
-  {
-    id: 'card-yoga',
-    title: 'Yoga for Beginners – Recovery Basics',
-    durationMinutes: 20,
-    durationLabel: '20 minutes',
-    intensity: 'Low',
-    imageUri: 'https://images.unsplash.com/photo-1506126613408-eca07ce68773?auto=format&fit=crop&w=600&q=80',
-    tag: 'Gentle Yoga',
-  },
-  {
-    id: 'card-surprise',
-    title: 'Surprise Me! 🎁',
-    subtitle: "Let's See What You Get",
-    imageUri: 'https://images.unsplash.com/photo-1513885535751-8b9238bd345a?auto=format&fit=crop&w=600&q=80',
-    isSpecial: true,
-  },
-];
-
 export const useChatStore = create<ChatState>((set, get) => ({
-  messages: [
-    {
-      id: 'msg-1',
-      sender: 'user',
-      text: "It's a little lower than normal. Let's do it, but nothing intense.",
-      timestamp: '9:41 AM',
-    },
-    {
-      id: 'msg-2',
-      sender: 'coach',
-      text: "Great attitude! Since today's a low-energy day, I've switched up your options to keep things light. Pick what feels best—something to stretch, move, or just reset. 💙",
-      timestamp: '9:42 AM',
-      options: INITIAL_ACTIVITY_CARDS,
-    },
-  ],
+  messages: [],
+  isLoading: false,
+  isTyping: false,
   selectedCardId: null,
-  quickReplies: ['Sounds good! 👍', 'I only have 5 mins ⏱', 'Show more options ✨', 'Gentle stretch sounds great! 🧘‍♀️'],
+  quickReplies: [
+    "What's my plan for today? 📋",
+    "I'm feeling a bit tired today 🥱",
+    "Why do I need to prepare? 💡",
+    "Surprise me! 🎁",
+  ],
+
+  setQuickReplies: (replies: string[]) => {
+    if (replies && replies.length > 0) {
+      set({ quickReplies: replies });
+    }
+  },
+
+  fetchMessages: async (patientId?: number) => {
+    try {
+      set({ isLoading: true });
+      const url = patientId
+        ? `/api/conversations/messages?patient_id=${patientId}`
+        : '/api/conversations/messages';
+      const response = await apiClient.get<ChatMessage[]>(url);
+      if (response.data && Array.isArray(response.data)) {
+        console.log(`📥 [Chat Store] Loaded ${response.data.length} messages from SQLite database`);
+        set({ messages: response.data, isLoading: false });
+      }
+    } catch (error) {
+      console.warn('⚠️ [Chat Store] Error fetching conversation history from backend:', error);
+      set({ isLoading: false });
+    }
+  },
 
   addIncomingMessage: (message: ChatMessage) => {
-    set((state) => ({
-      messages: [...state.messages, message],
-    }));
+    set((state) => {
+      // Update contextual quick replies if message came with new dynamic suggestions
+      const updatedQuickReplies =
+        message.quickReplies && message.quickReplies.length > 0
+          ? message.quickReplies
+          : state.quickReplies;
+
+      // Prevent duplicate messages by id or exact match
+      if (state.messages.some((m) => m.id === message.id)) {
+        return {
+          quickReplies: updatedQuickReplies,
+          isTyping: false,
+        };
+      }
+
+      return {
+        messages: [...state.messages, message],
+        quickReplies: updatedQuickReplies,
+        isTyping: false,
+      };
+    });
   },
 
-  sendMessage: (text: string, sender: 'user' | 'coach' = 'user') => {
+  sendMessage: async (text: string, patientId?: number) => {
     const now = new Date();
     const timeString = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const userMsgId = `msg-user-${Date.now()}`;
+
+    console.log(`💬 [Mobile Chat] Sending: "${text}"`);
+
     const newMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      sender,
+      id: userMsgId,
+      sender: 'user',
       text,
       timestamp: timeString,
     };
 
+    // 1. Immediately show user message in the thread & show typing indicator
     set((state) => ({
       messages: [...state.messages, newMessage],
+      isTyping: true,
     }));
 
-    if (sender === 'user') {
-      // Emit real-time message through Socket.IO to backend server
+    // 2. Primary Transport: Emit over Socket.IO if connected
+    if (socketService.isConnected()) {
       socketService.emit('send_message', {
         text,
         timestamp: timeString,
       });
+      return;
+    }
 
-      // Fallback local response simulation if server is offline
-      setTimeout(() => {
-        const coachResponse: ChatMessage = {
-          id: `msg-${Date.now() + 1}`,
-          sender: 'coach',
-          text: `Got it, Jen! I've updated your recovery plan accordingly. Take your time and enjoy your routine! 🌟`,
-          timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-        };
-        set((state) => ({
-          messages: [...state.messages, coachResponse],
-        }));
-      }, 900);
+    // 3. Fallback Transport: Send via HTTP REST only if Socket.IO is disconnected
+    try {
+      const response = await apiClient.post<ChatMessage>('/api/conversations/messages', {
+        text,
+        patient_id: patientId || 1,
+      });
+
+      if (response.data && response.data.text) {
+        console.log(`✨ [Mobile Chat] Received Amy reply: "${response.data.text.slice(0, 60)}..."`);
+        get().addIncomingMessage(response.data);
+      }
+    } catch (error) {
+      console.warn('⚠️ [Chat Store] REST send error:', error);
+      set({ isTyping: false });
     }
   },
 
   selectActivity: (card: ActivityCard) => {
-    set({ selectedCardId: card.id });
+    set({ selectedCardId: card.id, isTyping: true });
 
     const timeString = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const userSelectionMsg: ChatMessage = {
@@ -144,22 +159,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [...state.messages, userSelectionMsg],
     }));
 
-    // Emit activity selection through Socket.IO
-    socketService.emit('select_activity', {
-      activityId: card.id,
-      title: card.title,
-    });
-
-    setTimeout(() => {
-      const coachFeedbackMsg: ChatMessage = {
-        id: `msg-feedback-${Date.now() + 1}`,
-        sender: 'coach',
-        text: `Awesome pick! "${card.title}" is ready. Take a deep breath and start whenever you're ready. I'm cheering you on! 🌟`,
-        timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-      };
-      set((state) => ({
-        messages: [...state.messages, coachFeedbackMsg],
-      }));
-    }, 800);
+    if (socketService.isConnected()) {
+      // Emit activity selection through Socket.IO
+      socketService.emit('select_activity', {
+        activityId: card.id,
+        title: card.title,
+      });
+    } else {
+      get().sendMessage(`Selected: ${card.title}`);
+    }
   },
 }));
+
+// Listen to incoming Coach messages from Socket.IO
+socketService.onCoachMessage((data: any) => {
+  if (data && data.text) {
+    const msg: ChatMessage = {
+      id: data.id || `coach-${Date.now()}`,
+      sender: 'coach',
+      text: data.text,
+      timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      isSafetyAlert: data.isSafetyAlert,
+      riskLevel: data.riskLevel,
+      options: data.options,
+      quickReplies: data.quickReplies,
+    };
+    useChatStore.getState().addIncomingMessage(msg);
+  }
+});

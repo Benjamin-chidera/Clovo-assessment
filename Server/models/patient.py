@@ -1,17 +1,11 @@
 from datetime import datetime, timezone
 from typing import List, Optional, TYPE_CHECKING
-import uuid
 from sqlmodel import Field, Relationship, SQLModel
 from models.recommendation import PreparationItem
 
 if TYPE_CHECKING:
     from models.recommendation import Recommendation
     from models.conversation import Conversation
-
-
-def generate_uuid() -> str:
-    """Generate a standard UUID string for primary keys."""
-    return str(uuid.uuid4())
 
 
 def get_utc_now() -> datetime:
@@ -22,10 +16,11 @@ def get_utc_now() -> datetime:
 class Patient(SQLModel, table=True):
     """
     Patient profile table holding clinical pathway, procedure details, preferences, and app stats.
+    Serves as the database table model and primary entity.
     """
     __tablename__ = "patients"
 
-    id: str = Field(default_factory=generate_uuid, primary_key=True, index=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     email: Optional[str] = Field(default="sarah@clovo.app")
     avatar_uri: Optional[str] = Field(
@@ -47,9 +42,9 @@ class Patient(SQLModel, table=True):
 
 class UserProfileData(SQLModel):
     """
-    User profile payload returned for user route.
+    Composite DTO payload returned for /api/user with computed countdown and greeting.
     """
-    id: str
+    id: int
     name: str
     email: Optional[str] = None
     avatar_uri: Optional[str] = None
@@ -64,7 +59,7 @@ class UserProfileData(SQLModel):
 
 class PatientHomeData(SQLModel):
     """
-    Aggregated dashboard view for the home page.
+    Composite aggregated dashboard DTO for the mobile Home screen.
     """
     greeting: str
     patient_name: str
@@ -73,30 +68,3 @@ class PatientHomeData(SQLModel):
     procedure_name: Optional[str] = None
     procedure_date: Optional[datetime] = None
     preparations: List[PreparationItem]
-
-
-class PatientCreate(SQLModel):
-    id: Optional[str] = None
-    name: str
-    email: Optional[str] = "sarah@clovo.app"
-    avatar_uri: Optional[str] = None
-    plan: Optional[str] = "Pre-Op Preparation"
-    streak_count: int = 5
-    age: Optional[int] = None
-    pathway: Optional[str] = None
-    procedure: Optional[str] = None
-    procedure_date: Optional[datetime] = None
-    preferences: Optional[str] = None
-
-
-class PatientUpdate(SQLModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
-    avatar_uri: Optional[str] = None
-    plan: Optional[str] = None
-    streak_count: Optional[int] = None
-    age: Optional[int] = None
-    pathway: Optional[str] = None
-    procedure: Optional[str] = None
-    procedure_date: Optional[datetime] = None
-    preferences: Optional[str] = None

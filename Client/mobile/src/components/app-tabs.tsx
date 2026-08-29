@@ -16,7 +16,7 @@ export default function AppTabs() {
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="chat">
-        <NativeTabs.Trigger.Label>Coach Chat</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>Amy</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/explore.png')}
           renderingMode="template"

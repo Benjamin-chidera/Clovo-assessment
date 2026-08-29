@@ -1,16 +1,42 @@
+import os
 from contextlib import asynccontextmanager
 from typing import Dict
 import socketio
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
+from sentry_sdk.integrations.redis import RedisIntegration
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import create_db_and_tables
 from routes import api_router, register_socket_events
+from services import get_socket_manager, redis_cache
 
-# Initialize async Socket.IO server
+# Initialize Sentry Observability if DSN is configured
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+SENTRY_ENV = os.getenv("SENTRY_ENVIRONMENT", "development")
+
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=SENTRY_ENV,
+        integrations=[
+            StarletteIntegration(transaction_style="endpoint"),
+            FastApiIntegration(transaction_style="endpoint"),
+            RedisIntegration(),
+        ],
+        traces_sample_rate=1.0 if SENTRY_ENV == "development" else 0.2,
+        profiles_sample_rate=0.2,
+        send_default_pii=False,
+    )
+    print(f"🛡️ [Sentry] Server monitoring active in '{SENTRY_ENV}' mode.")
+
+# Initialize async Socket.IO server with optional Redis pub/sub manager
 sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins="*",
+    client_manager=get_socket_manager(),
     logger=True,
     engineio_logger=False,
 )
@@ -21,9 +47,11 @@ register_socket_events(sio)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifecycle hook for database initialization on startup."""
+    """Lifecycle hook for database & Redis initialization on startup."""
     create_db_and_tables()
+    await redis_cache.init()
     yield
+    await redis_cache.close()
 
 
 # Initialize FastAPI application
@@ -47,7 +75,7 @@ app.add_middleware(
 app.include_router(api_router)
 
 
-# --- Root & Health Endpoints (Only endpoints allowed in main.py) ---
+# --- Root & Health Endpoints ---
 
 @app.get("/health")
 async def health_check() -> Dict[str, str]:

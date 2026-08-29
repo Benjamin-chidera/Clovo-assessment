@@ -1,7 +1,9 @@
 fastapi[standard]
 python-socketio
+sqlmodel
 langchain
 langgraph
-sqlmodel
-pytest
-python-dotenv
+redis>=5.0.8
+hiredis>=3.0.0
+sentry-sdk[fastapi]>=2.13.0
+langchain-ollama
