@@ -1,0 +1,7 @@
+fastapi[standard]
+python-socketio
+langchain
+langgraph
+sqlmodel
+pytest
+python-dotenv
