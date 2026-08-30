@@ -5,6 +5,7 @@
 This specification defines the lightweight, privacy-compliant **Next.js Clinician & Admin Portal** for the Clovo AI Recovery Coach assessment.
 
 The primary focus of this assessment is **Coach Amy** (the intelligent LangGraph agent). The Admin Web Portal serves as the essential, lightweight **Clinician Oversight & Safety Triage Cockpit** to demonstrate:
+
 1. **Real-Time Safety Triage**: Immediate visibility into Amy's 4-tier safety escalations (`Critical`, `High`, `Medium`, `Low`) via Socket.IO.
 2. **AI Transparency & Auditability**: Audited inspection of Amy's multi-turn conversations and Langfuse trace links.
 3. **Healthcare Privacy & Ethics (HIPAA / GDPR / NHS DTAC)**: Anomaly/alert-driven access (no unrestricted chat browsing), automatic PII masking, and access logging.
@@ -25,13 +26,16 @@ The primary focus of this assessment is **Coach Amy** (the intelligent LangGraph
 ## 2. Privacy & Governance Principles (Lightweight Implementation)
 
 ### 2.1 The "Need-to-Know" Principle
+
 - **Alert-Driven Default**: The clinician lands on the **Safety Triage Queue** rather than an open list of all patient chats.
-- **Access Gating**: Conversations are accessed directly through active **Safety Alerts** or an audited search requiring a simple **Clinical Reason for Access** (e.g., *"Routine review"*, *"Safety alert follow-up"*).
+- **Access Gating**: Conversations are accessed directly through active **Safety Alerts** or an audited search requiring a simple **Clinical Reason for Access** (e.g., _"Routine review"_, _"Safety alert follow-up"_).
 
 ### 2.2 Data Minimization & Redaction
+
 - Sensitive PII (NHS numbers, phone numbers) are masked by default: `NHS: •••••• 4819`.
 
 ### 2.3 Lightweight Audit Logging
+
 - Every view of a conversation or patient record creates an entry in the `audit_logs` table (`user_id`, `action`, `patient_id`, `access_reason`, `timestamp`).
 
 ---
@@ -39,6 +43,7 @@ The primary focus of this assessment is **Coach Amy** (the intelligent LangGraph
 ## 3. Technology Stack & Design System
 
 ### 3.1 Tech Stack
+
 - **Framework**: Next.js 16 (App Router, TypeScript)
 - **State Management**: **Zustand** (`useSafetyTriageStore.ts`, `useAuthStore.ts`)
 - **Styling**: Tailwind CSS v4 with clean, modern healthcare tokens
@@ -47,6 +52,7 @@ The primary focus of this assessment is **Coach Amy** (the intelligent LangGraph
 - **Observability Links**: Direct URLs to local Langfuse traces (`http://localhost:3000`)
 
 ### 3.2 Design System Color Palette
+
 ```
 ┌──────────────────────────────┬───────────────────────────────────────────────────┐
 │ Token                        │ Hex / Value                                       │
@@ -110,6 +116,7 @@ Client/web/app/
 ```
 
 #### Key Features:
+
 - 4 clean KPI cards.
 - Real-time incoming safety alert stream powered by Socket.IO (`new_safety_event`).
 - One-click navigation to review and resolve escalations.
@@ -136,6 +143,7 @@ The core triage center where clinicians review and resolve Amy's safety escalati
 ```
 
 #### Triage & Resolution Drawer:
+
 - Shows the trigger utterance, detected category (`acute_medical`, `severe_pain`, `clinical_decision`, `mental_health`), and recommended action.
 - Action checkboxes: `[x] Spoke with patient`, `[ ] Contacted clinic`, `[x] Notified surgeon`.
 - Clinician Notes field (saves audit record).
@@ -171,8 +179,9 @@ Provides transparent visibility into Coach Amy's messages with clinical access r
 ```
 
 #### Key Features:
+
 - Displays escalated threads by default.
-- If searching for a non-escalated patient, opens a simple **Clinical Reason for Access** modal (*"Routine Review"*, *"Patient Phone Call"*, *"QA Audit"*).
+- If searching for a non-escalated patient, opens a simple **Clinical Reason for Access** modal (_"Routine Review"_, _"Patient Phone Call"_, _"QA Audit"_).
 - Direct link to inspect the exact prompt, latency, and tokens in the local Langfuse dashboard.
 
 ---
@@ -193,6 +202,7 @@ Provides transparent visibility into Coach Amy's messages with clinical access r
 ```
 
 #### Key Features:
+
 - Clean list of patients with procedure name, surgery countdown pill (`T - 21d`), daily task adherence, and safety risk status.
 - Clicking **[Audit]** navigates to their audited conversation view with clinical justification.
 
@@ -204,40 +214,44 @@ Per global coding standards, shared state is managed using lightweight Zustand s
 
 ```typescript
 // Client/web/src/stores/useSafetyTriageStore.ts
-import { create } from 'zustand';
+import { create } from "zustand";
 
 export interface SafetyEventItem {
   id: number;
   patient_id?: number;
   patientName?: string;
   conversation_id: string;
-  risk_level: 'critical' | 'high' | 'medium' | 'low';
+  risk_level: "critical" | "high" | "medium" | "low";
   trigger: string;
   action: string;
-  status: 'open' | 'under_review' | 'resolved';
+  status: "open" | "under_review" | "resolved";
   created_at: string;
 }
 
 interface SafetyTriageState {
   events: SafetyEventItem[];
   selectedEvent: SafetyEventItem | null;
-  activeFilter: 'all' | 'critical' | 'high' | 'medium' | 'low';
+  activeFilter: "all" | "critical" | "high" | "medium" | "low";
   setEvents: (events: SafetyEventItem[]) => void;
   addEvent: (event: SafetyEventItem) => void;
   resolveEvent: (id: number) => void;
   setSelectedEvent: (event: SafetyEventItem | null) => void;
-  setActiveFilter: (filter: 'all' | 'critical' | 'high' | 'medium' | 'low') => void;
+  setActiveFilter: (
+    filter: "all" | "critical" | "high" | "medium" | "low",
+  ) => void;
 }
 
 export const useSafetyTriageStore = create<SafetyTriageState>((set) => ({
   events: [],
   selectedEvent: null,
-  activeFilter: 'all',
+  activeFilter: "all",
   setEvents: (events) => set({ events }),
   addEvent: (event) => set((state) => ({ events: [event, ...state.events] })),
   resolveEvent: (id) =>
     set((state) => ({
-      events: state.events.map((e) => (e.id === id ? { ...e, status: 'resolved' } : e)),
+      events: state.events.map((e) =>
+        e.id === id ? { ...e, status: "resolved" } : e,
+      ),
     })),
   setSelectedEvent: (selectedEvent) => set({ selectedEvent }),
   setActiveFilter: (activeFilter) => set({ activeFilter }),
@@ -248,15 +262,15 @@ export const useSafetyTriageStore = create<SafetyTriageState>((set) => ({
 
 ## 6. Backend API Contracts
 
-| Endpoint | Method | Purpose |
-| :--- | :--- | :--- |
-| `/api/admin/dashboard/stats` | `GET` | Aggregated stats: active patients, open alerts, adherence rate. |
-| `/api/admin/safety-events` | `GET` | List of safety events across all patients. |
-| `/api/admin/safety-events/{id}/resolve` | `POST` | Mark safety event as resolved with clinician notes. |
-| `/api/admin/patients` | `GET` | Lightweight list of patients with procedure & risk status. |
-| `/api/admin/conversations/escalated` | `GET` | List of conversations currently flagged with safety alerts. |
-| `/api/admin/conversations/{id}/messages`| `GET` | Multi-turn message history with access audit logging. |
-| `/api/admin/audit-logs` | `POST` | Record access justification log entry. |
+| Endpoint                                 | Method | Purpose                                                         |
+| :--------------------------------------- | :----- | :-------------------------------------------------------------- |
+| `/api/admin/dashboard/stats`             | `GET`  | Aggregated stats: active patients, open alerts, adherence rate. |
+| `/api/admin/safety-events`               | `GET`  | List of safety events across all patients.                      |
+| `/api/admin/safety-events/{id}/resolve`  | `POST` | Mark safety event as resolved with clinician notes.             |
+| `/api/admin/patients`                    | `GET`  | Lightweight list of patients with procedure & risk status.      |
+| `/api/admin/conversations/escalated`     | `GET`  | List of conversations currently flagged with safety alerts.     |
+| `/api/admin/conversations/{id}/messages` | `GET`  | Multi-turn message history with access audit logging.           |
+| `/api/admin/audit-logs`                  | `POST` | Record access justification log entry.                          |
 
 ---
 

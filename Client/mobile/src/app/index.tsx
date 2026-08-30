@@ -7,6 +7,7 @@ import { PrimaryCheckInCTA } from '@/components/home/PrimaryCheckInCTA';
 import { MilestoneCard } from '@/components/home/MilestoneCard';
 import { PendingTasksList } from '@/components/home/PendingTasksList';
 import { ProfileModal } from '@/components/home/ProfileModal';
+import { FloatingBottomNav } from '@/components/FloatingBottomNav';
 import { BottomTabInset } from '@/constants/theme';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useSocketStore } from '@/stores/useSocketStore';
@@ -50,7 +51,7 @@ export default function HomeScreen() {
     <View className="flex-1 bg-[#F8F9FD]">
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: BottomTabInset + 40 }}
+        contentContainerStyle={{ paddingBottom: BottomTabInset + 70 }}
         showsVerticalScrollIndicator={false}
       >
         {/* A. Hero Banner Header */}
@@ -68,6 +69,9 @@ export default function HomeScreen() {
         {/* E. Pending Daily Tasks Section */}
         <PendingTasksList />
       </ScrollView>
+
+      {/* Persistent Floating 2-Tab Navigation Bar */}
+      <FloatingBottomNav activeTab="home" />
 
       {/* Profile & Logout Action Sheet Popup Modal */}
       <ProfileModal />
