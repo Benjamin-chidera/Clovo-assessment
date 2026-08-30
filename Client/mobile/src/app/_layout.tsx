@@ -1,12 +1,10 @@
-import { DarkTheme, DefaultTheme, ThemeProvider, Slot } from 'expo-router';
+import { DarkTheme, DefaultTheme, ThemeProvider, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme } from 'react-native';
 import * as Sentry from '@sentry/react-native';
 import "@/global.css";
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
-import { useAuthStore } from '@/stores/useAuthStore';
 
 // Initialize Sentry for crash reporting & tracing
 const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN || '';
@@ -25,12 +23,20 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const { isAuthenticated } = useAuthStore();
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AnimatedSplashOverlay />
-      {isAuthenticated ? <AppTabs /> : <Slot />}
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: 'fade',
+        }}
+      >
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="chat" options={{ headerShown: false }} />
+        <Stack.Screen name="login" options={{ headerShown: false }} />
+      </Stack>
     </ThemeProvider>
   );
 }

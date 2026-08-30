@@ -1,4 +1,9 @@
 import os
+from dotenv import load_dotenv
+
+# Load environment variables (.env) before service initializations
+load_dotenv()
+
 from contextlib import asynccontextmanager
 from typing import Dict
 import socketio

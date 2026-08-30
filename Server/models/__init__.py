@@ -19,6 +19,9 @@ from models.conversation import (
 from models.safety_event import (
     SafetyEvent,
 )
+from models.audit_log import (
+    AuditLog,
+)
 
 __all__ = [
     "ClinicalContent",
@@ -32,4 +35,5 @@ __all__ = [
     "Conversation",
     "Message",
     "SafetyEvent",
+    "AuditLog",
 ]

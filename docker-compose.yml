@@ -1,7 +1,7 @@
-version: '3.8'
-
 services:
+  # -------------------------------------------------------------
   # 1. Redis Service (Pub/Sub & Caching)
+  # -------------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: clovo-redis
@@ -17,7 +17,49 @@ services:
       timeout: 3s
       retries: 5
 
-  # 2. FastAPI + Socket.IO Server
+  # -------------------------------------------------------------
+  # 2. Local PostgreSQL DB for Langfuse
+  # -------------------------------------------------------------
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: clovo-langfuse-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=langfuse
+    volumes:
+      - langfuse-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------
+  # 3. Langfuse Observability & Evaluation Server (PostgreSQL Only)
+  # -------------------------------------------------------------
+  langfuse-server:
+    image: ghcr.io/langfuse/langfuse:2
+    container_name: clovo-langfuse-server
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@langfuse-db:5432/langfuse
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=clovo-secret-nextauth-key-2026
+      - SALT=clovo-salt-key-2026
+      - TELEMETRY_ENABLED=false
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+
+  # -------------------------------------------------------------
+  # 4. FastAPI + Socket.IO Server (Clovo Backend)
+  # -------------------------------------------------------------
   server:
     build:
       context: ./Server
@@ -26,16 +68,21 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    env_file:
+      - ./Server/.env
     environment:
       - ENV=development
       - PORT=8000
       - REDIS_URL=redis://redis:6379/0
+      - LANGFUSE_HOST=http://langfuse-server:3000
       - SENTRY_DSN=${SENTRY_SERVER_DSN:-}
       - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
       - DATABASE_URL=sqlite:///./clovo.db
     depends_on:
       redis:
         condition: service_healthy
+      langfuse-server:
+        condition: service_started
     volumes:
       - ./Server:/app
       - server-data:/app/data
@@ -43,3 +90,4 @@ services:
 volumes:
   redis-data:
   server-data:
+  langfuse-pgdata:

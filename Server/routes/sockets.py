@@ -1,6 +1,6 @@
 import asyncio
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 import socketio
 from sqlmodel import Session, select
@@ -105,6 +105,22 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
         }
 
         await sio.emit("coach_message", coach_reply, to=sid)
+
+        # Broadcast real-time safety alert to Admin Clinician Portal
+        if coach_output.get("is_safety_alert"):
+            alert_payload = {
+                "id": reply_id,
+                "patient_id": pid,
+                "patient_name": "Sarah Jenkins",
+                "procedure": "Knee Surgery",
+                "conversation_id": "conv-1",
+                "risk_level": coach_output.get("risk_level", "high"),
+                "trigger": user_text,
+                "action": "Alert care team and advise immediate rest",
+                "status": "open",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await sio.emit("new_safety_event", alert_payload)
 
     @sio.event
     async def select_activity(sid: str, data: Dict[str, Any]) -> None:

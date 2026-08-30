@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import StateGraph, START, END
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from sqlmodel import Session, select
 
 from models.clinical_content import ClinicalContent
@@ -13,6 +13,21 @@ from models.conversation import Conversation
 from models.patient import Patient
 from models.recommendation import Recommendation
 from services.safety_service import safety_service
+
+# Initialize Langfuse Observability
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    from langfuse import Langfuse
+    from langfuse.decorators import observe, langfuse_context
+    langfuse_client = Langfuse()
+except Exception:
+    def observe(*args, **kwargs):
+        def decorator(f):
+            return f
+        return decorator
+    langfuse_context = None
+    langfuse_client = None
 
 # Initialize LangChain Chat Model (Gemma 4 via Ollama)
 try:
@@ -119,9 +134,11 @@ class CoachState(TypedDict):
     procedure_name: str
     days_away: Optional[int]
     user_message: str
+    conversation_history: List[Dict[str, str]]
     grounded_library_text: str
     available_options: List[Dict[str, Any]]
     is_safety_alert: bool
+    safety_category: Optional[str]
     risk_level: Optional[str]
     safety_trigger: Optional[str]
     safety_action: Optional[str]
@@ -133,48 +150,86 @@ class CoachState(TypedDict):
 # =========================================================================
 # 2. Graph Nodes (Clean & Simple Single-Responsibility Functions)
 # =========================================================================
+@observe(name="safety_triage")
 def safety_triage_node(state: CoachState) -> Dict[str, Any]:
-    """Node 1: Screen user message for clinical safety red flags."""
-    safety_match = safety_service.screen_content(state["user_message"])
-    if safety_match:
-        trigger, risk_level, action = safety_match
-        print(f"🚨 [LangGraph: Safety Triage] FLAGGED! Risk: {risk_level.upper()} | Trigger: '{trigger}'")
+    """Node 1: Screen user message for clinical safety using semantic intent classifier."""
+    triage = safety_service.screen_message_semantic(
+        user_message=state["user_message"],
+        conversation_history=state.get("conversation_history", []),
+        llm_instance=llm,
+    )
+    if triage.get("is_safety_alert"):
+        category = triage.get("category", "acute_medical")
+        risk = triage.get("risk_level", "high")
+        trigger = triage.get("trigger", "Clinical safety issue detected")
+        action = triage.get("action", "Alert care team and advise rest")
+        print(f"🚨 [LangGraph: Safety Triage] FLAGGED! Category: {category.upper()} | Risk: {str(risk).upper()} | Trigger: '{trigger}'")
         return {
             "is_safety_alert": True,
-            "risk_level": risk_level,
+            "safety_category": category,
+            "risk_level": risk,
             "safety_trigger": trigger,
             "safety_action": action,
         }
     print("✅ [LangGraph: Safety Triage] SAFE (No clinical red flags detected)")
-    return {"is_safety_alert": False, "risk_level": None, "safety_trigger": None, "safety_action": None}
+    return {
+        "is_safety_alert": False,
+        "safety_category": "safe",
+        "risk_level": None,
+        "safety_trigger": None,
+        "safety_action": None,
+    }
 
 
+@observe(name="safety_escalation")
 def safety_escalation_node(state: CoachState) -> Dict[str, Any]:
-    """Node 2: Formulate clinical escalation and emergency de-escalation response."""
+    """Node 2: Formulate customized clinical escalation and de-escalation response."""
     name = state["patient_name"]
+    category = state.get("safety_category", "acute_medical")
     risk = state.get("risk_level", "high")
-    trigger = state.get("safety_trigger", "symptoms")
-    print(f"⚠️ [LangGraph: Escalation] Generating clinical safety response for {risk} risk")
+    trigger = state.get("safety_trigger", "your symptoms")
+    print(f"⚠️ [LangGraph: Escalation] Generating clinical safety response for category='{category}', risk='{risk}'")
 
-    if risk == "critical":
+    if category == "mental_health" or risk == "critical":
         response_text = (
-            f"🚨 {name}, this sounds like an urgent medical situation. "
-            "Please stop all activity immediately and call 999 or go to your nearest A&E right away. "
-            "I have logged this alert for your clinical care team."
+            f"🚨 {name}, I hear how overwhelmed you are feeling, and your safety is the absolute top priority right now. "
+            "Please stop all activity and reach out for immediate support. "
+            "You can call 999 for emergency help, call 111 for urgent mental health support, or call Samaritans free on 116 123 (available 24/7). "
+            "I have also flagged an urgent alert for your clinical care team."
         )
-        quick_replies = ["I called 999 🚨", "I am sitting down to rest", "Alert my doctor"]
-    elif risk == "high":
+        quick_replies = ["I called 999 / 111 🚨", "I am sitting down to rest", "Alert my doctor"]
+
+    elif category == "acute_medical":
         response_text = (
-            f"I'm so sorry you're experiencing {trigger}, {name}. "
-            "Pain or symptoms like this are your body's signal to stop immediately. "
-            "Please sit down, rest, and contact your surgical clinic or NHS 111 for clinical advice. "
-            "I've flagged this in your clinical record so your care team is aware. 💙"
+            f"I'm so sorry you're experiencing this with {trigger}, {name}. "
+            "Because this could indicate an acute complication or injury, please stop all physical exercises and activities immediately. "
+            "Sit or lie down in a safe, comfortable position. Please contact your surgical clinic or call NHS 111 right away for clinical guidance. "
+            "I have logged this alert in your clinical record so your care team is aware. 💙"
         )
-        quick_replies = ["I have sat down to rest 🧘", "I will call NHS 111 📞", "I'm feeling a bit better"]
+        quick_replies = ["I have sat down to rest 🧘", "I will call NHS 111 📞", "I will call my clinic"]
+
+    elif category == "severe_pain":
+        response_text = (
+            f"That sounds very painful, {name}. Sharp or severe pain is your body's signal to pause. "
+            "Please stop your current exercises and rest your joint immediately without putting weight on it. "
+            "If this is new or worsening pain that doesn't ease after resting, please contact your surgical clinic or NHS 111. "
+            "I have recorded this pain report for your care team. 💙"
+        )
+        quick_replies = ["I've stopped to rest 🧘", "It's new sharp pain", "I will call my clinic"]
+
+    elif category == "clinical_decision":
+        response_text = (
+            f"I understand your concerns about your treatment, {name}, but as your AI Recovery Coach, I cannot make decisions about your medications or alter prescriptions. "
+            "Stopping, discarding, or altering medications (like blood thinners or pain relief) can be dangerous and requires your doctor's explicit guidance. "
+            "Please contact your primary care clinician or NHS 111 immediately to discuss how you're feeling and get safe medical guidance. "
+            "I have notified your care team about your message so they can follow up with you."
+        )
+        quick_replies = ["I will call NHS 111 📞", "I will contact my doctor", "I will take a rest"]
+
     else:
         response_text = (
             f"Recovery is all about listening to your body, {name}. "
-            f"If you're feeling {trigger}, take a break and rest. "
+            f"If you're feeling {trigger}, please take a break and rest. "
             "If it persists, be sure to speak with your physiotherapist or clinical team."
         )
         quick_replies = ["I will take a break 👍", "What gentle stretches can I do?", "I feel okay now"]
@@ -186,8 +241,43 @@ def safety_escalation_node(state: CoachState) -> Dict[str, Any]:
     }
 
 
+@observe(as_type="generation", name="coach_amy_llm_inference")
+def invoke_coach_llm(prompt_messages: List[Any], model_name: str) -> Optional[str]:
+    """Invoke Ollama LLM and record Generation metrics (latency & tokens) in Langfuse."""
+    if not llm:
+        return None
+
+    prompt_str = "\n".join([str(m.content) for m in prompt_messages])
+    ai_reply = llm.invoke(prompt_messages)
+    if ai_reply and ai_reply.content:
+        content = str(ai_reply.content).strip()
+        if langfuse_context:
+            try:
+                input_tokens = max(1, len(prompt_str.split()))
+                output_tokens = max(1, len(content.split()))
+                langfuse_context.update_current_observation(
+                    model=model_name,
+                    input={"prompt": prompt_str},
+                    output=content,
+                    usage={
+                        "input": input_tokens,
+                        "output": output_tokens,
+                        "total": input_tokens + output_tokens,
+                        "unit": "TOKENS",
+                    },
+                )
+            except Exception:
+                pass
+        return content
+    return None
+
+
+@observe(name="amy_coaching")
 def coaching_node(state: CoachState) -> Dict[str, Any]:
-    """Node 3: Generate personalized, clinically-grounded Coach Amy response using LangChain LLM."""
+    """
+    Generate grounded, empathetic coaching response using SQLite knowledge library.
+    Falls back gracefully to rich grounded templates if LLM is unavailable.
+    """
     name = state["patient_name"]
     procedure = state["procedure_name"]
     days = state["days_away"]
@@ -211,22 +301,36 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
     # 1. Primary Generation: LangChain LLM Grounded Inference (Gemma 4 via Ollama)
     if llm:
         try:
-            print(f"🧠 [LangGraph: Coaching] Invoking LangChain LLM ({OLLAMA_MODEL}) with grounded context...")
+            print(f"🧠 [LangGraph: Coaching] Invoking LangChain LLM ({OLLAMA_MODEL}) with multi-turn memory & grounded context...")
             prompt_context = (
                 f"Patient Profile: {name} (Preparing for {procedure} {time_context}).\n\n"
                 f"Approved Clinical Content & Physiological Rationales (From Database):\n"
-                f"{clinical_library}\n\n"
-                f"Patient says: \"{user_msg}\""
+                f"{clinical_library}"
             )
 
-            prompt_messages = [
+            prompt_messages: List[Any] = [
                 SystemMessage(content=AMY_SYSTEM_PROMPT),
                 HumanMessage(content=prompt_context),
             ]
 
-            ai_reply = llm.invoke(prompt_messages)
-            if ai_reply and ai_reply.content:
-                reply_text, dynamic_replies = extract_quick_replies(str(ai_reply.content).strip())
+            # Inject recent conversation history for multi-turn conversational memory
+            history = state.get("conversation_history", [])
+            if history:
+                for turn in history[-6:]:
+                    role = turn.get("role", "user")
+                    content = turn.get("content", "")
+                    if content and content != user_msg:
+                        if role == "user":
+                            prompt_messages.append(HumanMessage(content=content))
+                        elif role in ["coach", "assistant"]:
+                            prompt_messages.append(AIMessage(content=content))
+
+            # Add current user utterance
+            prompt_messages.append(HumanMessage(content=f"Patient says: \"{user_msg}\""))
+
+            llm_text = invoke_coach_llm(prompt_messages, OLLAMA_MODEL)
+            if llm_text:
+                reply_text, dynamic_replies = extract_quick_replies(llm_text)
                 print(f"✨ [LangGraph: Coaching] LLM Generated Response ({len(reply_text)} chars) with {len(dynamic_replies)} dynamic replies")
                 return {
                     "response_text": reply_text,
@@ -310,6 +414,7 @@ class AmyCoachService:
     def __init__(self) -> None:
         self.graph = build_coach_graph()
 
+    @observe(name="coach_amy_response")
     def generate_coach_response(
         self,
         session: Session,
@@ -322,6 +427,28 @@ class AmyCoachService:
         Pulls all content dynamically from the SQLite clinical database.
         """
         print(f"\n💬 [Coach Amy Pipeline] Incoming from Patient: '{user_message}'")
+
+        # Enrich Langfuse trace with session, user, and clinical tags
+        if langfuse_context:
+            try:
+                langfuse_context.update_current_trace(
+                    name=f"Amy Coaching Session: {patient.name or 'Sarah'}",
+                    session_id=f"conv-{conversation.id}",
+                    user_id=f"patient-{patient.id}",
+                    tags=["amy_coach", patient.procedure or "wellness", f"phase_{patient.phase or 'active'}"],
+                    metadata={
+                        "patient_id": patient.id,
+                        "patient_name": patient.name,
+                        "conversation_id": conversation.id,
+                        "procedure": patient.procedure,
+                        "procedure_date": str(patient.procedure_date) if patient.procedure_date else None,
+                    },
+                )
+                langfuse_context.update_current_observation(
+                    input={"user_message": user_message}
+                )
+            except Exception:
+                pass
 
         # Calculate days away dynamically from patient record
         days_away: Optional[int] = None
@@ -390,15 +517,25 @@ class AmyCoachService:
             "isSpecial": True,
         })
 
+        # 0. Load persistent multi-turn conversation history from SQLite
+        from services.conversation_service import conversation_service
+        raw_history = conversation_service.get_messages(session, conversation.id)
+        conversation_history = [
+            {"role": msg.role, "content": msg.content}
+            for msg in raw_history[:-1] if msg.content
+        ]
+
         # Execute through compiled LangGraph
         initial_state: CoachState = {
             "patient_name": patient.name or "Sarah",
             "procedure_name": patient.procedure or "Knee Surgery",
             "days_away": days_away,
             "user_message": user_message,
+            "conversation_history": conversation_history,
             "grounded_library_text": grounded_library_text,
             "available_options": available_options,
             "is_safety_alert": False,
+            "safety_category": None,
             "risk_level": None,
             "safety_trigger": None,
             "safety_action": None,
@@ -422,6 +559,41 @@ class AmyCoachService:
 
         final_clean_text = clean_plain_text(result_state["response_text"])
         print(f"📤 [Coach Amy Response Ready] Clean text length: {len(final_clean_text)} chars | Options: {bool(result_state.get('suggested_options'))} | Replies: {result_state.get('quick_replies')}\n")
+
+        # Record automated evaluation scores into Langfuse
+        if langfuse_context:
+            try:
+                is_safe = not result_state.get("is_safety_alert", False)
+                has_grounding = bool(grounded_library_text)
+                has_options = bool(result_state.get("suggested_options"))
+
+                langfuse_context.score_current_trace(
+                    name="safety_score",
+                    value=1.0 if is_safe else 0.0,
+                    comment="Safety triage check passed" if is_safe else f"Safety Alert: {result_state.get('safety_trigger')}",
+                )
+                langfuse_context.score_current_trace(
+                    name="clinical_grounding",
+                    value=1.0 if has_grounding else 0.5,
+                    comment="Grounded in SQLite clinical knowledge library",
+                )
+                langfuse_context.score_current_trace(
+                    name="actionability",
+                    value=1.0 if (has_options or result_state.get("quick_replies")) else 0.8,
+                    comment="Dynamic quick-replies and activity cards provided",
+                )
+
+                langfuse_context.update_current_observation(
+                    output={
+                        "response_text": final_clean_text,
+                        "is_safety_alert": result_state.get("is_safety_alert", False),
+                        "suggested_options_count": len(result_state.get("suggested_options") or []),
+                        "quick_replies": result_state.get("quick_replies", []),
+                    }
+                )
+                langfuse_context.flush()
+            except Exception:
+                pass
 
         return {
             "text": final_clean_text,

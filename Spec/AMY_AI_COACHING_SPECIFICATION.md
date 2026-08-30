@@ -67,68 +67,64 @@ To operate safely and effectively as a digital health product in the UK, Amy is 
 
 ## 4. Safety Triage & Escalation Workflow
 
-When a patient message contains symptom triggers or safety flags, Amy halts open-ended generation, logs a formal `SafetyEvent` in the database, provides supportive de-escalation instructions, and directs the patient to their clinician or emergency services.
+When a patient message is received, Amy evaluates the clinical intent and severity using an **LLM-Powered Semantic Safety Classifier** backed by an **Instant Deterministic Emergency Fast-Path** (sub-millisecond regex safety net). If safety red flags or out-of-scope clinical requests are detected, Amy halts open-ended generation, logs a formal `SafetyEvent` to the SQLite database, provides supportive de-escalation/refusal instructions tailored to the exact category, and directs the patient to appropriate clinical services.
 
-### 4.1 Safety Severity Matrix
+### 4.1 4-Tier Clinical Safety Severity Matrix
 
-| Risk Level | Trigger Keywords / Patterns | System Action | Amy's Response Pattern |
-| :--- | :--- | :--- | :--- |
-| **Critical** | Chest pain, severe shortness of breath, collapse, heavy bleeding, suicidal ideation | Creates `SafetyEvent(risk_level='critical')`, halts coaching thread | *"This sounds like an urgent medical situation. Please call 999 or go to your nearest A&E immediately. I have logged this for your care team."* |
-| **High** | Acute sharp joint pain, sudden severe swelling, fever > 38.5°C, calf redness, severe dizziness | Creates `SafetyEvent(risk_level='high')`, pauses exercise guidance | *"I'm sorry you are experiencing this. Dizziness/pain is a sign to stop immediately. I've flagged this for your clinical team to review. Please rest and contact your clinic or NHS 111."* |
-| **Medium** | Moderate soreness, mild fatigue, feeling overwhelmed, confusion on exercise form | Creates `SafetyEvent(risk_level='medium')`, suggests resting | *"Recovery takes time and listening to your body is essential. If soreness persists or worsens, take a break and consult your physiotherapist."* |
-| **Low / In-Scope** | Mild stiffness, general questions on hydration, encouragement requests | Continues standard coaching flow | Normal conversational guidance grounded in `clinical_content`. |
+| Category | Risk Level | Clinical Triggers & Intent Patterns | System Action | Amy's Tailored Response Pattern |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. Mental Health Crisis** | **Critical** | Suicidal ideation, explicit or implied self-harm, severe hopelessness, feeling like giving up completely. | Creates `SafetyEvent(risk_level='critical')`, halts exercise threads, triggers emergency clinical alert. | *"🚨 Sarah, I hear how overwhelmed you are feeling, and your safety is the absolute top priority right now. Please stop all activity and reach out for immediate support: call 999, call 111, or contact Samaritans free on 116 123 (24/7). I have logged an urgent alert for your care team."* |
+| **2. Acute Medical Symptoms (Red Flags & Trauma)** | **High** | Physical trauma (e.g. hit head, falls), surgical wound infection (pus, redness, hot to touch), fever > 38.5°C, calf swelling/redness (DVT), severe dizziness, chest tightness, respiratory distress. | Creates `SafetyEvent(risk_level='high')`, suppresses exercise recommendations, prompts immediate rest. | *"I'm so sorry you're experiencing this with your head injury / fever, Sarah. Because this could indicate an acute complication, please stop all physical exercises immediately, sit or lie down, and contact your surgical clinic or NHS 111 right away. I have logged this for your care team. 💙"* |
+| **3. Severe Pain or Adverse Reactions** | **Medium** | Pain rating > 7/10, sudden sharp/stabbing joint pain, unbearable throbbing, worsening acute flare-ups. | Creates `SafetyEvent(risk_level='medium')`, pauses joint loading, checks if new or recurring. | *"That sounds very painful, Sarah. Sharp or severe pain is your body's signal to pause. Please stop your current exercises and rest your joint immediately without putting weight on it. If this is new or doesn't settle, contact your clinic or NHS 111. I have recorded this pain report. 💙"* |
+| **4. Out-of-Scope Requests (Clinical Decisions / Medications)** | **Low / Informational** | Medication disposal (e.g. flushed pills in toilet), stopping prescriptions (blood thinners), dosage changes, requesting diagnostic decisions or prescriptions. | Creates `SafetyEvent(risk_level='low')`, refuses clinical changes, reinforces safety boundary, notifies care team. | *"I understand your concerns about your treatment, Sarah, but as your AI Recovery Coach, I cannot make decisions about your medications or alter prescriptions. Stopping or discarding medications can be dangerous and requires your doctor's explicit guidance. Please contact your clinician or NHS 111 immediately. I have notified your care team."* |
+| **5. Normal Recovery Check-In (In-Scope)** | **Safe** | Mild normal stiffness, questions on form/nutrition/hydration, plan inquiries, progress milestones. | Continues standard coaching flow with grounded clinical rationales and recovery activity cards. | Warm conversational guidance grounded strictly in `clinical_content` physiological rationales. |
 
 ---
 
-## 5. Software Architecture & LangGraph Decision Pipeline
+## 5. Software Architecture & Multi-Turn LangGraph Pipeline
 
-Amy's backend inference is structured as a deterministic multi-node state machine using **LangGraph / LangChain**:
+Amy's backend inference is structured as a deterministic multi-node state machine using **LangGraph / LangChain** with persistent multi-turn conversational memory:
 
 ```
                          ┌─────────────────────────────┐
                          │   Incoming User Message     │
+                         │   + Persistent History (DB) │
                          └──────────────┬──────────────┘
                                         │
                                         ▼
                          ┌─────────────────────────────┐
-                         │   Node 1: Safety & Red Flag │
-                         │         Triage Guard        │
+                         │   Node 1: Semantic Safety   │
+                         │      Triage Classifier      │
+                         │ (Fast-Path Regex + LLM JSON)│
                          └──────────────┬──────────────┘
                                         │
                     ┌───────────────────┴───────────────────┐
                     │                                       │
-            [Safety Flag Detected]                  [Safe / In-Scope]
+            [Safety Alert Detected]                  [Safe / In-Scope]
+            (Critical, High, Medium, Low)                   │
                     │                                       │
                     ▼                                       ▼
      ┌─────────────────────────────┐         ┌─────────────────────────────┐
-     │ Node 2: Safety Escalation   │         │ Node 3: Intent & Context    │
-     │  • Log SafetyEvent to DB    │         │         Classifier          │
-     │  • Real-time care alert     │         └──────────────┬──────────────┘
-     │  • Safe de-escalation text  │                        │
-     └─────────────────────────────┘        ┌───────────────┴───────────────┐
-                                            │                               │
-                                     [Recommendation/Why]            [General/Motivational]
-                                            │                               │
-                                            ▼                               ▼
-                             ┌─────────────────────────────┐ ┌─────────────────────────────┐
-                             │ Node 4: Content Grounding   │ │ Node 5: Motivational Coach  │
-                             │  • Query clinical_content   │ │  • Empathetic coaching      │
-                             │  • Inject approved rationale│ │  • Adherence acknowledgment │
-                             └──────────────┬──────────────┘ └──────────────┬──────────────┘
-                                            │                               │
-                                            └───────────────┬───────────────┘
-                                                            │
-                                                            ▼
-                                             ┌─────────────────────────────┐
-                                             │ Node 6: Guardrail & Out-of- │
-                                             │         Scope Validator     │
-                                             └──────────────┬──────────────┘
-                                                            │
-                                                            ▼
-                                             ┌─────────────────────────────┐
-                                             │ Outgoing Coach Amy Message  │
-                                             └─────────────────────────────┘
+     │ Node 2: Safety Escalation   │         │ Node 3: Grounded Coach Amy  │
+     │  • Log SafetyEvent to DB    │         │  • Multi-Turn Context (DB)  │
+     │  • 4-Tier Tailored Response │         │  • Query clinical_content   │
+     │  • Emergency/111 Escalation │         │  • Inject Approved Rationale│
+     │  • Suppress Activity Cards  │         │  • Dynamic Quick Replies    │
+     └──────────────┬──────────────┘         └──────────────┬──────────────┘
+                    │                                       │
+                    └───────────────────┬───────────────────┘
+                                        │
+                                        ▼
+                         ┌─────────────────────────────┐
+                         │ Outgoing Coach Amy Message  │
+                         │   (Socket.IO Real-Time)     │
+                         └─────────────────────────────┘
 ```
+
+### 5.1 Multi-Turn Conversation Memory Architecture
+- **Persistent Message Storage**: All user and coach messages are persisted in the SQLite `messages` table under the patient's `conversation_id`.
+- **Context Injection**: On each incoming message, `AmyCoachService` loads the recent message history via `conversation_service.get_messages(session, conversation.id)`.
+- **LangChain Message History**: Past turns are formatted as `HumanMessage` and `AIMessage` and injected into `prompt_messages` before the current turn. This guarantees conversational continuity across mobile app restarts and multi-turn discussions.
 
 ---
 

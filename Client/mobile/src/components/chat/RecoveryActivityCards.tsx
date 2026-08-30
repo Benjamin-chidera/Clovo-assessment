@@ -11,13 +11,17 @@ import * as Haptics from "expo-haptics";
 import { ActivityCard, useChatStore } from "@/stores/useChatStore";
 
 interface RecoveryActivityCardsProps {
-  options: ActivityCard[];
+  options?: ActivityCard[] | null;
 }
 
 export const RecoveryActivityCards: React.FC<RecoveryActivityCardsProps> = ({
   options,
 }) => {
   const { selectedCardId, selectActivity } = useChatStore();
+
+  if (!options || !Array.isArray(options) || options.length === 0) {
+    return null;
+  }
 
   const handleCardPress = (card: ActivityCard) => {
     if (Platform.OS !== "web") {
