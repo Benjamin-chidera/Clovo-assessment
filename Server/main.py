@@ -32,11 +32,13 @@ if SENTRY_DSN:
     )
     print(f"🛡️ [Sentry] Server monitoring active in '{SENTRY_ENV}' mode.")
 
-# Initialize async Socket.IO server with optional Redis pub/sub manager
+# Initialize async Socket.IO server with ping timeout safeguards
 sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins="*",
     client_manager=get_socket_manager(),
+    ping_timeout=60,
+    ping_interval=25,
     logger=True,
     engineio_logger=False,
 )

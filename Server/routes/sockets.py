@@ -53,51 +53,50 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
     async def send_message(sid: str, data: Dict[str, Any]) -> None:
         """
         Receive user chat message, persist to SQLite, execute Coach Amy's
-        clinical decision graph (LangGraph), and stream intelligent response.
+        clinical decision graph (LangGraph) in a worker thread, and stream intelligent response.
         """
         session = await sio.get_session(sid)
         user_id = session.get("userId", "1") if session else "1"
         user_text = data.get("text", "")
 
         print(f"💬 [Message] From {user_id}: {user_text}")
-
-        # Resolve patient ID
         pid = int(user_id) if str(user_id).isdigit() else 1
 
-        with Session(engine) as db_session:
-            patient = patient_service.get_patient_by_id(db_session, pid) or patient_service.get_or_create_default_patient(db_session)
-            conv = conversation_service.get_or_create_conversation(db_session, patient.id)
-            
-            # Persist user message
-            conversation_service.add_message(
-                db_session,
-                Message(conversation_id=conv.id, role="user", content=user_text),
-            )
+        def _process_sync():
+            with Session(engine) as db_session:
+                patient = patient_service.get_patient_by_id(db_session, pid) or patient_service.get_or_create_default_patient(db_session)
+                conv = conversation_service.get_or_create_conversation(db_session, patient.id)
 
-            # Generate intelligent, clinically grounded response via CoachService pipeline
-            coach_output = coach_service.generate_coach_response(
-                session=db_session,
-                patient=patient,
-                conversation=conv,
-                user_message=user_text,
-            )
+                # 1. Persist user message
+                conversation_service.add_message(
+                    db_session,
+                    Message(conversation_id=conv.id, role="user", content=user_text),
+                )
 
-            coach_reply_text = coach_output["text"]
+                # 2. Generate intelligent, clinically grounded response via CoachService pipeline
+                coach_output = coach_service.generate_coach_response(
+                    session=db_session,
+                    patient=patient,
+                    conversation=conv,
+                    user_message=user_text,
+                )
 
-            # Persist coach response
-            saved_reply = conversation_service.add_message(
-                db_session,
-                Message(conversation_id=conv.id, role="coach", content=coach_reply_text),
-            )
-            reply_id = saved_reply.id
+                # 3. Persist coach response
+                saved_reply = conversation_service.add_message(
+                    db_session,
+                    Message(conversation_id=conv.id, role="coach", content=coach_output["text"]),
+                )
+                return coach_output, saved_reply.id
 
-        await asyncio.sleep(0.4)
+        # Offload synchronous SQLite queries and LLM generation to background threadpool
+        # to ensure the asyncio event loop remains 100% responsive for Socket.IO ping/pong heartbeats!
+        coach_output, reply_id = await asyncio.to_thread(_process_sync)
 
         timestamp = datetime.now().strftime("%-I:%M %p")
         coach_reply = {
             "id": reply_id,
             "sender": "coach",
-            "text": coach_reply_text,
+            "text": coach_output["text"],
             "timestamp": timestamp,
             "isSafetyAlert": coach_output.get("is_safety_alert", False),
             "riskLevel": coach_output.get("risk_level"),
@@ -120,62 +119,58 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
         activity_id = data.get("activityId", "")
 
         print(f"🎯 [Activity Selected] User={user_id}: '{activity_title}' ({activity_id})")
-
-        # Resolve patient ID
         pid = int(user_id) if str(user_id).isdigit() else 1
 
-        with Session(engine) as db_session:
-            patient = patient_service.get_patient_by_id(db_session, pid) or patient_service.get_or_create_default_patient(db_session)
-            conv = conversation_service.get_or_create_conversation(db_session, patient.id)
+        def _process_activity_sync():
+            with Session(engine) as db_session:
+                patient = patient_service.get_patient_by_id(db_session, pid) or patient_service.get_or_create_default_patient(db_session)
+                conv = conversation_service.get_or_create_conversation(db_session, patient.id)
 
-            # 1. Save user selection message to database
-            user_select_text = f"Selected: {activity_title}"
-            conversation_service.add_message(
-                db_session,
-                Message(conversation_id=conv.id, role="user", content=user_select_text),
-            )
-
-            # 2. Check if Surprise Me was clicked
-            is_surprise = "surprise" in activity_id.lower() or "surprise" in activity_title.lower()
-
-            all_content = db_session.exec(select(ClinicalContent)).all()
-
-            if is_surprise:
-                # Pick a surprise activity from the clinical content library
-                surprise_candidates = [c for c in all_content if c.id in [4, 5, 6, 7]]
-                chosen = random.choice(surprise_candidates) if surprise_candidates else all_content[0]
-                
-                reply_text = (
-                    f"Surprise, {patient.name}! 🎁 Today your bonus recovery activity is {chosen.title}!\n\n"
-                    f"{chosen.description}\n\n"
-                    f"Why this helps: {chosen.rationale} 💙"
+                # 1. Save user selection message to database
+                user_select_text = f"Selected: {activity_title}"
+                conversation_service.add_message(
+                    db_session,
+                    Message(conversation_id=conv.id, role="user", content=user_select_text),
                 )
-                quick_replies = ["I'll do it now! ✅", "How do I do this?", "Give me another surprise 🎁"]
-            else:
-                # Look up content details
-                matching = next(
-                    (c for c in all_content if c.title.lower() in activity_title.lower() or f"content-{c.id}" == activity_id),
-                    None
-                )
-                if matching:
+
+                # 2. Check if Surprise Me was clicked
+                is_surprise = "surprise" in activity_id.lower() or "surprise" in activity_title.lower()
+                all_content = db_session.exec(select(ClinicalContent)).all()
+
+                if is_surprise:
+                    surprise_candidates = [c for c in all_content if c.id in [4, 5, 6, 7]]
+                    chosen = random.choice(surprise_candidates) if surprise_candidates else all_content[0]
                     reply_text = (
-                        f"Great choice, {patient.name}! You picked {matching.title}.\n\n"
-                        f"{matching.description}\n\n"
-                        f"Why this helps: {matching.rationale} 🌟"
+                        f"Surprise, {patient.name}! 🎁 Today your bonus recovery activity is {chosen.title}!\n\n"
+                        f"{chosen.description}\n\n"
+                        f"Why this helps: {chosen.rationale} 💙"
                     )
+                    quick_replies = ["I'll do it now! ✅", "How do I do this?", "Give me another surprise 🎁"]
                 else:
-                    reply_text = f"Great choice, {patient.name}! '{activity_title}' is ready for you. Take your time, listen to your body, and enjoy the routine! 🌟"
-                
-                quick_replies = ["Mark as completed ✅", "Remind me in 1 hour ⏰", "What else should I do?"]
+                    matching = next(
+                        (c for c in all_content if c.title.lower() in activity_title.lower() or f"content-{c.id}" == activity_id),
+                        None
+                    )
+                    if matching:
+                        reply_text = (
+                            f"Great choice, {patient.name}! You picked {matching.title}.\n\n"
+                            f"{matching.description}\n\n"
+                            f"Why this helps: {matching.rationale} 🌟"
+                        )
+                    else:
+                        reply_text = f"Great choice, {patient.name}! '{activity_title}' is ready for you. Take your time, listen to your body, and enjoy the routine! 🌟"
 
-            # 3. Save Coach Amy reply to database
-            saved_reply = conversation_service.add_message(
-                db_session,
-                Message(conversation_id=conv.id, role="coach", content=reply_text),
-            )
-            reply_id = saved_reply.id
+                    quick_replies = ["Mark as completed ✅", "Remind me in 1 hour ⏰", "What else should I do?"]
 
-        await asyncio.sleep(0.3)
+                # 3. Save Coach Amy reply to database
+                saved_reply = conversation_service.add_message(
+                    db_session,
+                    Message(conversation_id=conv.id, role="coach", content=reply_text),
+                )
+                return reply_text, saved_reply.id, quick_replies
+
+        reply_text, reply_id, quick_replies = await asyncio.to_thread(_process_activity_sync)
+
         timestamp = datetime.now().strftime("%-I:%M %p")
         coach_reply = {
             "id": reply_id,
@@ -195,9 +190,13 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
         """Handle synchronization of daily preparation tasks with SQLite persistence."""
         task_id = data.get("taskId", "")
         tid = int(task_id) if str(task_id).isdigit() else 1
-        with Session(engine) as db_session:
-            rec = recommendation_service.toggle_status(db_session, tid)
-            is_completed = (rec.status == "completed") if rec else data.get("isCompleted", False)
+
+        def _toggle_sync():
+            with Session(engine) as db_session:
+                rec = recommendation_service.toggle_status(db_session, tid)
+                return (rec.status == "completed") if rec else data.get("isCompleted", False)
+
+        is_completed = await asyncio.to_thread(_toggle_sync)
 
         print(f"📋 [Task Updated] taskId={task_id}, completed={is_completed}")
         await redis_cache.delete_pattern("tasks:*")

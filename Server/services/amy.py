@@ -19,13 +19,13 @@ try:
     from langchain_ollama import ChatOllama
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:latest")
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.4, timeout=30)
+    llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.4, timeout=10)
 except Exception:
     llm = None
 
 
 AMY_SYSTEM_PROMPT = """You are Amy, an empathetic, encouraging, and clinically-grounded AI Recovery Coach at Clovo.
-You are assisting surgical and wellness patients (such as Sarah, preparing for Knee Surgery in 21 days).
+You are assisting surgical and wellness patients.
 
 FORMATTING RULES (VERY IMPORTANT):
 - Output ONLY natural, clean plain conversational text.
@@ -117,7 +117,7 @@ def extract_quick_replies(raw_text: str) -> tuple[str, List[str]]:
 class CoachState(TypedDict):
     patient_name: str
     procedure_name: str
-    days_away: int
+    days_away: Optional[int]
     user_message: str
     grounded_library_text: str
     available_options: List[Dict[str, Any]]
@@ -196,6 +196,8 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
     clinical_library = state.get("grounded_library_text", "")
     db_options = state.get("available_options", [])
 
+    time_context = f"in {days} days" if days is not None else "in your recovery journey"
+
     # Check if the user is asking for activity options, low energy, schedule, or surprises
     option_keywords = [
         "energy", "low", "tired", "light", "gentle", "exhausted", "lazy",
@@ -211,7 +213,7 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
         try:
             print(f"🧠 [LangGraph: Coaching] Invoking LangChain LLM ({OLLAMA_MODEL}) with grounded context...")
             prompt_context = (
-                f"Patient Profile: {name} (Preparing for {procedure} in {days} days).\n\n"
+                f"Patient Profile: {name} (Preparing for {procedure} {time_context}).\n\n"
                 f"Approved Clinical Content & Physiological Rationales (From Database):\n"
                 f"{clinical_library}\n\n"
                 f"Patient says: \"{user_msg}\""
@@ -243,16 +245,18 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
         )
         quick_replies = ["Gentle stretch sounds great! 🧘", "I'll do the 15 min walk 🚶", "Can we do 5 mins? ⏱"]
     elif any(w in msg_lower for w in ["done", "completed", "finished", "did my", "walked"]):
+        time_msg = f"You're {days} days away from your {procedure}" if days is not None else f"You're making great progress in your {procedure} preparation"
         response_text = (
             f"Fantastic job completing your preparation, {name}! 🎉 "
-            f"Every bit of daily consistency adds up. You're {days} days away from your {procedure}, "
+            f"Every bit of daily consistency adds up. {time_msg}, "
             "and your body is getting stronger and more prepared every day. How are you feeling right now?"
         )
         quick_replies = ["Feeling good! 😊", "A bit sore but okay", "What's my next task? 📋"]
     else:
+        time_msg = f"With your {procedure} {days} days away, consistent" if days is not None else f"For your {procedure} preparation, consistent"
         response_text = (
             f"Hello {name}! I'm here to support and guide your recovery journey. "
-            f"With your {procedure} {days} days away, consistent pre-operative preparation builds joint stability and smooths post-op recovery. "
+            f"{time_msg} pre-operative preparation builds joint stability and smooths post-op recovery. "
             "What can I help you with today? 🌟"
         )
         quick_replies = ["What is the point of quad sets? 💡", "Show me today's routine 🗓", "Surprise me! 🎁"]
@@ -319,8 +323,8 @@ class AmyCoachService:
         """
         print(f"\n💬 [Coach Amy Pipeline] Incoming from Patient: '{user_message}'")
 
-        # Calculate days away
-        days_away = 21
+        # Calculate days away dynamically from patient record
+        days_away: Optional[int] = None
         if patient.procedure_date:
             now = datetime.now(timezone.utc)
             proc_date = patient.procedure_date
