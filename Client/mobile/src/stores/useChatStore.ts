@@ -12,6 +12,8 @@ export interface ActivityCard {
   imageUri: string;
   isSpecial?: boolean;
   tag?: string;
+  isCompleted?: boolean;
+  recommendationId?: number;
 }
 
 export interface ChatMessage {

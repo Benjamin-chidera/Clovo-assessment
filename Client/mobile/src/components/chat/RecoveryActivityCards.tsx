@@ -9,6 +9,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { ActivityCard, useChatStore } from "@/stores/useChatStore";
+import { useTaskStore } from "@/stores/useTaskStore";
 
 interface RecoveryActivityCardsProps {
   options?: ActivityCard[] | null;
@@ -18,6 +19,7 @@ export const RecoveryActivityCards: React.FC<RecoveryActivityCardsProps> = ({
   options,
 }) => {
   const { selectedCardId, selectActivity } = useChatStore();
+  const { tasks } = useTaskStore();
 
   if (!options || !Array.isArray(options) || options.length === 0) {
     return null;
@@ -35,11 +37,23 @@ export const RecoveryActivityCards: React.FC<RecoveryActivityCardsProps> = ({
       {options.map((card) => {
         const isSelected = selectedCardId === card.id;
 
+        // Check if task is completed via card prop or taskStore match
+        const isCompleted =
+          card.isCompleted ||
+          tasks.some(
+            (t) =>
+              (t.id === String(card.recommendationId) ||
+                t.title.toLowerCase() === card.title.toLowerCase()) &&
+              t.isCompleted
+          );
+
         return (
           <TouchableOpacity
             key={card.id}
             className={`w-full bg-white rounded-2xl p-2.5 flex-row items-center border ${
-              isSelected
+              isCompleted
+                ? "border-emerald-300 bg-emerald-50/20"
+                : isSelected
                 ? "border-[#3B49DF] bg-blue-50/20"
                 : "border-gray-100 shadow-sm"
             }`}
@@ -55,7 +69,8 @@ export const RecoveryActivityCards: React.FC<RecoveryActivityCardsProps> = ({
                 height: 62,
                 borderRadius: 14,
                 overflow: "hidden",
-                backgroundColor: "#F3F4F6",
+                backgroundColor: isCompleted ? "#D1FAE5" : "#F3F4F6",
+                position: "relative",
               }}
             >
               <Image
@@ -63,16 +78,42 @@ export const RecoveryActivityCards: React.FC<RecoveryActivityCardsProps> = ({
                 style={{ width: 62, height: 62, borderRadius: 14 }}
                 resizeMode="cover"
               />
+              {isCompleted && (
+                <View className="absolute inset-0 bg-emerald-900/20 items-center justify-center">
+                  <View className="w-6 h-6 rounded-full bg-emerald-500 items-center justify-center shadow-sm">
+                    <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+                  </View>
+                </View>
+              )}
             </View>
 
             {/* Details on the right */}
             <View className="flex-1 ml-3.5 justify-center">
-              <Text
-                className="text-[15px] font-semibold text-[#111827] leading-5"
-                numberOfLines={1}
-              >
-                {card.title}
-              </Text>
+              <View className="flex-row items-center justify-between">
+                <Text
+                  className={`text-[15px] font-semibold leading-5 ${
+                    isCompleted ? "text-emerald-950 font-bold" : "text-[#111827]"
+                  }`}
+                  numberOfLines={1}
+                  style={{ flexShrink: 1 }}
+                >
+                  {card.title}
+                </Text>
+
+                {isCompleted && (
+                  <View className="bg-emerald-100 px-2 py-0.5 rounded-full flex-row items-center ml-2">
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={12}
+                      color="#059669"
+                      style={{ marginRight: 3 }}
+                    />
+                    <Text className="text-[10px] font-bold text-emerald-700">
+                      Completed
+                    </Text>
+                  </View>
+                )}
+              </View>
 
               {card.isSpecial ? (
                 <Text className="text-[13px] text-[#6B7280] font-normal mt-1">
@@ -85,10 +126,14 @@ export const RecoveryActivityCards: React.FC<RecoveryActivityCardsProps> = ({
                     <Ionicons
                       name="time-outline"
                       size={14}
-                      color="#9CA3AF"
+                      color={isCompleted ? "#059669" : "#9CA3AF"}
                       style={{ marginRight: 3 }}
                     />
-                    <Text className="text-[13px] text-[#6B7280] font-normal">
+                    <Text
+                      className={`text-[13px] font-normal ${
+                        isCompleted ? "text-emerald-700" : "text-[#6B7280]"
+                      }`}
+                    >
                       {card.durationLabel || `${card.durationMinutes || 10} minutes`}
                     </Text>
                   </View>
@@ -100,7 +145,11 @@ export const RecoveryActivityCards: React.FC<RecoveryActivityCardsProps> = ({
                   {/* Intensity with muscle icon */}
                   <View className="flex-row items-center">
                     <Text className="text-[12px] mr-1">💪</Text>
-                    <Text className="text-[13px] text-[#6B7280] font-normal">
+                    <Text
+                      className={`text-[13px] font-normal ${
+                        isCompleted ? "text-emerald-700" : "text-[#6B7280]"
+                      }`}
+                    >
                       {card.intensity || "Low"}
                     </Text>
                   </View>

@@ -6,6 +6,7 @@ type MessageListener = (data: any) => void;
 class SocketService {
   private socket: Socket | null = null;
   private coachMessageListeners: MessageListener[] = [];
+  private taskSyncListeners: MessageListener[] = [];
 
   public isConnected(): boolean {
     return Boolean(this.socket && this.socket.connected);
@@ -40,6 +41,11 @@ class SocketService {
       this.coachMessageListeners.forEach((listener) => listener(data));
     });
 
+    this.socket.on('task_sync', (data: any) => {
+      console.log('📋 [Socket.IO] Received task_sync:', data);
+      this.taskSyncListeners.forEach((listener) => listener(data));
+    });
+
     this.socket.on('disconnect', (reason) => {
       console.log('❌ [Socket.IO] Disconnected from server. Reason:', reason);
     });
@@ -55,6 +61,13 @@ class SocketService {
     this.coachMessageListeners.push(callback);
     return () => {
       this.coachMessageListeners = this.coachMessageListeners.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onTaskSync(callback: MessageListener): () => void {
+    this.taskSyncListeners.push(callback);
+    return () => {
+      this.taskSyncListeners = this.taskSyncListeners.filter((cb) => cb !== callback);
     };
   }
 

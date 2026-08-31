@@ -124,5 +124,76 @@ class RecommendationService:
         session.refresh(rec)
         return rec
 
+    @staticmethod
+    def mark_task_completed(
+        session: Session,
+        patient_id: int,
+        task_id: Optional[int] = None,
+        activity_name: Optional[str] = None,
+    ) -> Optional[Recommendation]:
+        """
+        Mark a recommendation as completed by ID or semantic activity name matching.
+        """
+        # 1. Match by explicit integer ID
+        if task_id:
+            rec = session.get(Recommendation, task_id)
+            if rec and rec.patient_id == patient_id:
+                rec.status = "completed"
+                session.add(rec)
+                session.commit()
+                session.refresh(rec)
+                return rec
+
+        # 2. Match by activity name / keywords in ClinicalContent
+        if activity_name:
+            statement = (
+                select(Recommendation, ClinicalContent)
+                .join(ClinicalContent, Recommendation.content_id == ClinicalContent.id)
+                .where(
+                    Recommendation.patient_id == patient_id,
+                    Recommendation.status == "active"
+                )
+            )
+            results = session.exec(statement).all()
+
+            act_lower = activity_name.lower().strip()
+            for rec, content in results:
+                c_title = content.title.lower()
+                c_type = content.type.lower()
+                if (
+                    c_title in act_lower
+                    or act_lower in c_title
+                    or ("quad" in act_lower and "quad" in c_title)
+                    or ("leg" in act_lower and "leg" in c_title)
+                    or ("raise" in act_lower and "raise" in c_title)
+                    or ("snack" in act_lower and "snack" in c_title)
+                    or ("protein" in act_lower and "protein" in c_title)
+                    or ("breath" in act_lower and "breath" in c_title)
+                    or ("stretch" in act_lower and "stretch" in c_title)
+                    or ("walk" in act_lower and "walk" in c_title)
+                    or ("all" in act_lower or "everything" in act_lower)
+                ):
+                    rec.status = "completed"
+                    session.add(rec)
+                    session.commit()
+                    session.refresh(rec)
+                    return rec
+
+        # 3. Fallback: Mark the first active recommendation for this patient
+        statement = (
+            select(Recommendation)
+            .where(Recommendation.patient_id == patient_id, Recommendation.status == "active")
+            .order_by(Recommendation.scheduled_date.asc())
+        )
+        rec = session.exec(statement).first()
+        if rec:
+            rec.status = "completed"
+            session.add(rec)
+            session.commit()
+            session.refresh(rec)
+            return rec
+
+        return None
+
 
 recommendation_service = RecommendationService()

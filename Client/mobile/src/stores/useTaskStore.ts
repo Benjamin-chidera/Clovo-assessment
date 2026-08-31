@@ -21,6 +21,7 @@ export interface TaskState {
   setTasks: (tasks: DailyTask[]) => void;
   fetchTasks: (userId?: string) => Promise<void>;
   toggleTask: (id: string) => void;
+  markTaskCompleted: (id: string, isCompleted?: boolean) => void;
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
@@ -28,6 +29,17 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   isLoading: false,
 
   setTasks: (tasks: DailyTask[]) => set({ tasks }),
+
+  markTaskCompleted: (id: string, isCompleted: boolean = true) => {
+    set((state) => ({
+      tasks: state.tasks.map((task) => {
+        if (task.id === id || String(task.id) === String(id) || `task-${task.id}` === id) {
+          return { ...task, isCompleted };
+        }
+        return task;
+      }),
+    }));
+  },
 
   /**
    * Fetch actual task list from the SQLite database via Axios
@@ -39,7 +51,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
       if (rawTasks && Array.isArray(rawTasks)) {
         const mapped: DailyTask[] = rawTasks.map((t) => ({
-          id: t.id,
+          id: String(t.id),
           title: t.title,
           category: t.category,
           duration: t.duration || 'Daily',
@@ -84,3 +96,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     });
   },
 }));
+
+// Listen to real-time task sync events from Socket.IO (e.g. completed via Coach Amy)
+socketService.onTaskSync((data: any) => {
+  if (data && data.taskId !== undefined) {
+    console.log('🔄 [useTaskStore] Applying real-time task_sync update:', data);
+    useTaskStore.getState().markTaskCompleted(String(data.taskId), Boolean(data.isCompleted));
+  }
+});

@@ -89,7 +89,6 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
                 return coach_output, saved_reply.id
 
         # Offload synchronous SQLite queries and LLM generation to background threadpool
-        # to ensure the asyncio event loop remains 100% responsive for Socket.IO ping/pong heartbeats!
         coach_output, reply_id = await asyncio.to_thread(_process_sync)
 
         timestamp = datetime.now().strftime("%-I:%M %p")
@@ -105,6 +104,15 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
         }
 
         await sio.emit("coach_message", coach_reply, to=sid)
+
+        # Broadcast real-time task completion event to Mobile Home and Chat stores
+        if coach_output.get("completed_task"):
+            completed_info = coach_output["completed_task"]
+            task_id = completed_info.get("taskId")
+            print(f"📡 [Socket.IO] Broadcasting task_sync for completed task #{task_id}")
+            await redis_cache.delete_pattern("tasks:*")
+            await redis_cache.delete_pattern("home:*")
+            await sio.emit("task_sync", {"taskId": task_id, "isCompleted": True}, to=f"user_{user_id}")
 
         # Broadcast real-time safety alert to Admin Clinician Portal
         if coach_output.get("is_safety_alert"):
@@ -217,4 +225,4 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
         print(f"📋 [Task Updated] taskId={task_id}, completed={is_completed}")
         await redis_cache.delete_pattern("tasks:*")
         await redis_cache.delete_pattern("home:*")
-        await sio.emit("task_sync", {"taskId": task_id, "isCompleted": is_completed}, to=sid)
+        await sio.emit("task_sync", {"taskId": task_id, "isCompleted": is_completed}, to=f"user_{sid}")
