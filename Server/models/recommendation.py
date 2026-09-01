@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, TYPE_CHECKING
 from sqlmodel import SQLModel, Field, Relationship
 
@@ -30,7 +30,8 @@ class Recommendation(SQLModel, table=True):
     scheduled_date: date = Field(default_factory=date.today, index=True)
 
     # State & Lifecycle
-    status: str = Field(default="active", index=True, description="active, completed, skipped")
+    status: str = Field(default="active", index=True, description="active, completed, missed, skipped")
+    completed_at: Optional[datetime] = Field(default=None, description="Exact timestamp when task was completed")
 
     # Optional specific notes for this patient
     notes: Optional[str] = Field(default=None, description="Custom clinical or coach notes")
@@ -38,6 +39,7 @@ class Recommendation(SQLModel, table=True):
     # SQLModel Relationships
     patient: Optional["Patient"] = Relationship(back_populates="recommendations")
     content: Optional["ClinicalContent"] = Relationship(back_populates="recommendations")
+
 
 
 class PreparationItem(SQLModel):

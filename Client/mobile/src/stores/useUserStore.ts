@@ -4,10 +4,13 @@ import { useTaskStore, DailyTask, TaskCategory } from '@/stores/useTaskStore';
 
 export interface MilestoneBadge {
   id: string;
+  code?: string;
   title: string;
+  description?: string;
   iconName: string;
   color: string;
   bgGradient: [string, string];
+  unlockedAt?: string;
 }
 
 export interface UserState {
@@ -23,9 +26,12 @@ export interface UserState {
   streakCount: number;
   completedDays: number[];
   badges: MilestoneBadge[];
+  additionalMilestonesCount: number;
+  totalCompletedTasks: number;
   isLoading: boolean;
   setStreakCount: (count: number) => void;
   incrementStreak: () => void;
+  updateStats: (stats: { streakCount?: number; milestones?: MilestoneBadge[]; additionalMilestonesCount?: number }) => void;
   fetchUser: (userId?: string) => Promise<void>;
   fetchHomeData: (patientId?: string) => Promise<void>;
 }
@@ -59,6 +65,27 @@ const mapCategoryToLabel = (type: string): string => {
   }
 };
 
+const formatMilestones = (rawMilestones?: any[]): MilestoneBadge[] => {
+  if (!rawMilestones || !Array.isArray(rawMilestones) || rawMilestones.length === 0) {
+    return [];
+  }
+
+  return rawMilestones.map((m) => ({
+    id: m.id || m.code || String(Math.random()),
+    code: m.code,
+    title: m.title || 'Milestone',
+    description: m.description,
+    iconName: m.icon_name || m.iconName || 'trophy',
+    color: m.color || '#4F46E5',
+    bgGradient: Array.isArray(m.bg_gradient)
+      ? [m.bg_gradient[0] || '#E0E7FF', m.bg_gradient[1] || '#C7D2FE']
+      : Array.isArray(m.bgGradient)
+      ? m.bgGradient
+      : ['#E0E7FF', '#C7D2FE'],
+    unlockedAt: m.unlocked_at || m.unlockedAt,
+  }));
+};
+
 export const useUserStore = create<UserState>((set) => ({
   id: 'patient-sarah',
   name: 'Sarah',
@@ -69,32 +96,13 @@ export const useUserStore = create<UserState>((set) => ({
   surgeryTitle: 'Your surgery',
   daysAway: 21,
   procedureName: 'Knee Surgery',
-  streakCount: 5,
-  completedDays: [1, 2, 3, 4, 5],
+  streakCount: 0,
+  completedDays: [],
+  badges: [],
+  additionalMilestonesCount: 0,
+  totalCompletedTasks: 0,
   isLoading: false,
-  badges: [
-    {
-      id: 'yoga',
-      title: 'Yoga Milestone',
-      iconName: 'fitness',
-      color: '#4F46E5',
-      bgGradient: ['#E0E7FF', '#C7D2FE'],
-    },
-    {
-      id: 'run',
-      title: '5K Completed',
-      iconName: 'walk',
-      color: '#EC4899',
-      bgGradient: ['#FCE7F3', '#FBCFE8'],
-    },
-    {
-      id: 'core',
-      title: 'Core Strength',
-      iconName: 'barbell',
-      color: '#10B981',
-      bgGradient: ['#D1FAE5', '#A7F3D0'],
-    },
-  ],
+
 
   setStreakCount: (count) => set({ streakCount: count }),
 
@@ -104,6 +112,13 @@ export const useUserStore = create<UserState>((set) => ({
       completedDays: [...state.completedDays, state.streakCount + 1],
     })),
 
+  updateStats: (stats) =>
+    set((state) => ({
+      streakCount: stats.streakCount ?? state.streakCount,
+      badges: stats.milestones ? formatMilestones(stats.milestones) : state.badges,
+      additionalMilestonesCount: stats.additionalMilestonesCount ?? state.additionalMilestonesCount,
+    })),
+
   /**
    * Fetch actual user profile data from the SQLite database via Axios
    */
@@ -111,6 +126,9 @@ export const useUserStore = create<UserState>((set) => ({
     try {
       set({ isLoading: true });
       const user: UserProfileResponse = await apiService.getUser(userId);
+
+      const parsedBadges = formatMilestones(user.milestones);
+      const addCount = user.additional_milestones_count ?? Math.max(0, parsedBadges.length - 3);
 
       set({
         id: user.id || 'patient-sarah',
@@ -123,6 +141,9 @@ export const useUserStore = create<UserState>((set) => ({
         surgeryTitle: user.surgery_title || 'Your surgery',
         daysAway: user.days_away ?? 21,
         procedureName: user.procedure_name || 'Knee Surgery',
+        badges: parsedBadges,
+        additionalMilestonesCount: addCount,
+        totalCompletedTasks: user.total_completed_tasks ?? parsedBadges.length,
         isLoading: false,
       });
     } catch (error) {
@@ -139,12 +160,19 @@ export const useUserStore = create<UserState>((set) => ({
       set({ isLoading: true });
       const data: HomeDataResponse = await apiService.getHomeData(patientId);
 
+      const parsedBadges = formatMilestones(data.milestones);
+      const addCount = data.additional_milestones_count ?? Math.max(0, parsedBadges.length - 3);
+
       set({
         name: data.patient_name || 'Sarah',
         greeting: data.greeting ? data.greeting.split(',')[0] : 'Good morning',
         surgeryTitle: data.surgery_title || 'Your surgery',
         daysAway: data.days_away ?? 21,
         procedureName: data.procedure_name || 'Knee Surgery',
+        streakCount: data.streak_count ?? 5,
+        badges: parsedBadges,
+        additionalMilestonesCount: addCount,
+        totalCompletedTasks: data.total_completed_tasks ?? parsedBadges.length,
         isLoading: false,
       });
 
@@ -166,3 +194,4 @@ export const useUserStore = create<UserState>((set) => ({
     }
   },
 }));
+

@@ -92,6 +92,101 @@ DEFAULT_CONTENT_LIBRARY = [
 ]
 
 
+DEFAULT_MILESTONES = [
+    {
+        "id": 1,
+        "code": "first_step",
+        "title": "First Step",
+        "description": "Completed your very first pre-op preparation activity",
+        "category": "adherence",
+        "icon_name": "footsteps",
+        "color": "#4F46E5",
+        "bg_gradient_start": "#E0E7FF",
+        "bg_gradient_end": "#C7D2FE",
+        "criteria_type": "completed_tasks",
+        "criteria_threshold": 1,
+    },
+    {
+        "id": 2,
+        "code": "quad_master",
+        "title": "Quad Master",
+        "description": "Strengthened knee quads with targeted isometric sets",
+        "category": "exercise",
+        "icon_name": "fitness",
+        "color": "#4F46E5",
+        "bg_gradient_start": "#E0E7FF",
+        "bg_gradient_end": "#C7D2FE",
+        "criteria_type": "specific_exercise",
+        "criteria_threshold": 1,
+    },
+    {
+        "id": 3,
+        "code": "mindful_zen",
+        "title": "Mindfulness Zen",
+        "description": "Lowered pre-op cortisol with 4-7-8 breathing practice",
+        "category": "mindfulness",
+        "icon_name": "flower",
+        "color": "#10B981",
+        "bg_gradient_start": "#D1FAE5",
+        "bg_gradient_end": "#A7F3D0",
+        "criteria_type": "specific_exercise",
+        "criteria_threshold": 1,
+    },
+    {
+        "id": 4,
+        "code": "protein_champ",
+        "title": "Nutrition Champion",
+        "description": "Fueled body with surgery-prep protein snack",
+        "category": "nutrition",
+        "icon_name": "nutrition",
+        "color": "#F59E0B",
+        "bg_gradient_start": "#FEF3C7",
+        "bg_gradient_end": "#FDE68A",
+        "criteria_type": "specific_exercise",
+        "criteria_threshold": 1,
+    },
+    {
+        "id": 5,
+        "code": "streak_3",
+        "title": "3-Day Streak",
+        "description": "Maintained 3 consecutive days of pre-op routine",
+        "category": "adherence",
+        "icon_name": "flame",
+        "color": "#EF4444",
+        "bg_gradient_start": "#FEE2E2",
+        "bg_gradient_end": "#FECACA",
+        "criteria_type": "streak_days",
+        "criteria_threshold": 3,
+    },
+    {
+        "id": 6,
+        "code": "streak_5",
+        "title": "5-Day Streak",
+        "description": "Achieved a 5-day consistency streak before surgery",
+        "category": "adherence",
+        "icon_name": "walk",
+        "color": "#EC4899",
+        "bg_gradient_start": "#FCE7F3",
+        "bg_gradient_end": "#FBCFE8",
+        "criteria_type": "streak_days",
+        "criteria_threshold": 5,
+    },
+    {
+        "id": 7,
+        "code": "recovery_ready",
+        "title": "Core & Mobility",
+        "description": "Demonstrated consistent daily mobility and core readiness",
+        "category": "exercise",
+        "icon_name": "barbell",
+        "color": "#10B981",
+        "bg_gradient_start": "#D1FAE5",
+        "bg_gradient_end": "#A7F3D0",
+        "criteria_type": "completed_tasks",
+        "criteria_threshold": 5,
+    },
+]
+
+
 def seed_clinical_content(session: Session) -> None:
     """Seed default clinical content library if not already populated."""
     from models.clinical_content import ClinicalContent
@@ -102,11 +197,54 @@ def seed_clinical_content(session: Session) -> None:
             content = ClinicalContent(**item)
             session.add(content)
         else:
-            # Update existing with complete metadata
             for key, val in item.items():
                 setattr(existing, key, val)
             session.add(existing)
     session.commit()
+
+
+def seed_milestones(session: Session) -> None:
+    """Seed default milestone definitions catalog."""
+    from models.milestone import Milestone
+
+    for item in DEFAULT_MILESTONES:
+        existing = session.get(Milestone, item["id"])
+        if not existing:
+            milestone = Milestone(**item)
+            session.add(milestone)
+        else:
+            for key, val in item.items():
+                setattr(existing, key, val)
+            session.add(existing)
+    session.commit()
+
+
+def migrate_db_columns() -> None:
+    """Safely migrate any newly added SQLite columns if they don't exist yet."""
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+
+        # Check patients table columns
+        cursor.execute("PRAGMA table_info(patients)")
+        patient_cols = [row[1] for row in cursor.fetchall()]
+        if "last_active_date" not in patient_cols:
+            cursor.execute("ALTER TABLE patients ADD COLUMN last_active_date DATE")
+        if "total_completed_tasks" not in patient_cols:
+            cursor.execute("ALTER TABLE patients ADD COLUMN total_completed_tasks INTEGER DEFAULT 0")
+
+        # Check recommendations table columns
+        cursor.execute("PRAGMA table_info(recommendations)")
+        rec_cols = [row[1] for row in cursor.fetchall()]
+        if "completed_at" not in rec_cols:
+            cursor.execute("ALTER TABLE recommendations ADD COLUMN completed_at TIMESTAMP")
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ [Database Migration Note]: {e}")
 
 
 def create_db_and_tables() -> None:
@@ -116,15 +254,21 @@ def create_db_and_tables() -> None:
     import models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
+    migrate_db_columns()
 
     with Session(engine) as session:
         # 1. Seed clinical content library
         seed_clinical_content(session)
 
-        # 2. Seed initial patient (Sarah) and personalized recommendations
+        # 2. Seed milestone catalog
+        seed_milestones(session)
+
+        # 3. Seed initial patient (Sarah) and personalized recommendations
         from services.patient_service import patient_service
 
         patient_service.get_or_create_default_patient(session)
+
+
 
 
 def get_session() -> Generator[Session, None, None]:

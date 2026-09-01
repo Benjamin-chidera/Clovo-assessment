@@ -22,6 +22,11 @@ from models.safety_event import (
 from models.audit_log import (
     AuditLog,
 )
+from models.milestone import (
+    Milestone,
+    PatientMilestone,
+    MilestoneDTO,
+)
 
 __all__ = [
     "ClinicalContent",
@@ -36,4 +41,8 @@ __all__ = [
     "Message",
     "SafetyEvent",
     "AuditLog",
+    "Milestone",
+    "PatientMilestone",
+    "MilestoneDTO",
 ]
+

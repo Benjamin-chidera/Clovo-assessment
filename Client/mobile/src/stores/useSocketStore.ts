@@ -10,6 +10,8 @@ export interface SocketState {
   setConnected: (isConnected: boolean, socketId?: string | null) => void;
 }
 
+let isSocketListenerAttached = false;
+
 export const useSocketStore = create<SocketState>((set) => ({
   isConnected: false,
   isConnecting: false,
@@ -20,28 +22,33 @@ export const useSocketStore = create<SocketState>((set) => ({
   },
 
   connect: (userId: string) => {
-    set({ isConnecting: true });
     const socket = socketService.connect(userId);
+    set({
+      isConnected: socket.connected,
+      isConnecting: !socket.connected,
+      socketId: socket.id ?? null,
+    });
 
-    if (socket.connected) {
-      set({ isConnected: true, isConnecting: false, socketId: socket.id ?? null });
+    if (!isSocketListenerAttached) {
+      isSocketListenerAttached = true;
+
+      socket.on('connect', () => {
+        set({ isConnected: true, isConnecting: false, socketId: socket.id ?? null });
+      });
+
+      socket.on('disconnect', () => {
+        set({ isConnected: false, isConnecting: false, socketId: null });
+      });
+
+      socket.on('connect_error', () => {
+        set({ isConnected: false, isConnecting: false });
+      });
     }
-
-    socket.on('connect', () => {
-      set({ isConnected: true, isConnecting: false, socketId: socket.id ?? null });
-    });
-
-    socket.on('disconnect', () => {
-      set({ isConnected: false, isConnecting: false, socketId: null });
-    });
-
-    socket.on('connect_error', () => {
-      set({ isConnected: false, isConnecting: false });
-    });
   },
 
   disconnect: () => {
     socketService.disconnect();
+    isSocketListenerAttached = false;
     set({ isConnected: false, isConnecting: false, socketId: null });
   },
 }));

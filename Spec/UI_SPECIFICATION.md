@@ -122,7 +122,9 @@ App Navigation Hierarchy
 - **Back / Dismiss Action**: Left circular button with `↖` arrow.
 - **Coach Profile Avatar**: Circular portrait of Amy with green `• Active` status badge.
 - **Coach Title**: **Amy - Recovery Coach** (Bold `16pt`).
-- **Status Indicator**: `Active` in emerald green.
+- **Status Indicator**: `Active` in emerald green (switches to `🎙️ Listening...` or `🔊 Speaking...` during voice mode).
+- **Top-Right Voice Action Button**: Circular action button on the far right (`36x36 dp`) with `Ionicons` `mic-outline` / `volume-high` for hands-free voice coaching mode.
+
 
 #### B. Message Thread Area
 - **Timestamp Labels**: Centered subtle timestamps (e.g. `9:41 AM`).

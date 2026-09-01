@@ -7,6 +7,7 @@ from routes.users import router as users_router
 from routes.tasks import router as tasks_router
 from routes.conversations import router as conversations_router
 from routes.admin import router as admin_router
+from routes.voice import router as voice_router
 from routes.sockets import register_socket_events
 
 api_router = APIRouter()
@@ -18,6 +19,7 @@ api_router.include_router(users_router)
 api_router.include_router(tasks_router)
 api_router.include_router(conversations_router)
 api_router.include_router(admin_router)
+api_router.include_router(voice_router)
 
 __all__ = [
     "api_router",
@@ -28,5 +30,6 @@ __all__ = [
     "tasks_router",
     "conversations_router",
     "admin_router",
+    "voice_router",
     "register_socket_events",
 ]

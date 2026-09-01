@@ -59,6 +59,14 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
         user_id = session.get("userId", "1") if session else "1"
         user_text = data.get("text", "")
 
+        # Voice session trigger: when the patient taps the mic, the app sends
+        # this special signal. We translate it into a natural greeting request
+        # so Amy speaks first before the patient starts talking.
+        VOICE_SESSION_TRIGGER = "[VOICE_SESSION_START]"
+        is_voice_session = user_text.strip() == VOICE_SESSION_TRIGGER
+        if is_voice_session:
+            user_text = "Hi Amy, I just started a voice conversation with you. Please greet me warmly and ask how I'm feeling today. Keep it brief and conversational since we're talking by voice."
+
         print(f"💬 [Message] From {user_id}: {user_text}")
         pid = int(user_id) if str(user_id).isdigit() else 1
 
@@ -105,14 +113,44 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
 
         await sio.emit("coach_message", coach_reply, to=sid)
 
-        # Broadcast real-time task completion event to Mobile Home and Chat stores
-        if coach_output.get("completed_task"):
-            completed_info = coach_output["completed_task"]
-            task_id = completed_info.get("taskId")
-            print(f"📡 [Socket.IO] Broadcasting task_sync for completed task #{task_id}")
+        # Broadcast real-time task sync (completion/unmarking) event to Mobile Home and Chat stores
+        completed_task_data = coach_output.get("completed_task")
+        if completed_task_data:
+            # Normalise to a list — single-task completions arrive as a dict, bulk resets as a list
+            task_list = completed_task_data if isinstance(completed_task_data, list) else [completed_task_data]
+
             await redis_cache.delete_pattern("tasks:*")
             await redis_cache.delete_pattern("home:*")
-            await sio.emit("task_sync", {"taskId": task_id, "isCompleted": True}, to=f"user_{user_id}")
+
+            def _get_stats():
+                with Session(engine) as db_session:
+                    p = patient_service.get_patient_by_id(db_session, pid)
+                    milestones, add_count = patient_service.get_patient_milestones(db_session, pid)
+                    streak = p.streak_count if p else 0
+                    m_dump = [m.model_dump() for m in milestones]
+                    return streak, m_dump, add_count
+
+            streak_count, milestones_data, add_count = await asyncio.to_thread(_get_stats)
+
+            for task_info in task_list:
+                task_id = task_info.get("taskId")
+                is_comp = task_info.get("isCompleted", True)
+                action_label = "completed" if is_comp else "reset to pending"
+                print(f"📡 [Socket.IO] Broadcasting task_sync for task #{task_id} ({action_label})")
+                await sio.emit("task_sync", {
+                    "taskId": task_id,
+                    "isCompleted": is_comp,
+                    "streakCount": streak_count,
+                    "milestones": milestones_data,
+                    "additionalMilestonesCount": add_count,
+                }, to=f"user_{user_id}")
+
+            await sio.emit("user_stats_updated", {
+                "streakCount": streak_count,
+                "milestones": milestones_data,
+                "additionalMilestonesCount": add_count,
+            }, to=f"user_{user_id}")
+
 
         # Broadcast real-time safety alert to Admin Clinician Portal
         if coach_output.get("is_safety_alert"):
@@ -162,8 +200,7 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
                 all_content = db_session.exec(select(ClinicalContent)).all()
 
                 if is_surprise:
-                    surprise_candidates = [c for c in all_content if c.id in [4, 5, 6, 7]]
-                    chosen = random.choice(surprise_candidates) if surprise_candidates else all_content[0]
+                    chosen = recommendation_service.get_safe_surprise_activity(db_session, patient.id)
                     reply_text = (
                         f"Surprise, {patient.name}! 🎁 Today your bonus recovery activity is {chosen.title}!\n\n"
                         f"{chosen.description}\n\n"
@@ -211,18 +248,42 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
 
     @sio.event
     async def task_toggle(sid: str, data: Dict[str, Any]) -> None:
-        """Handle synchronization of daily preparation tasks with SQLite persistence."""
+        """Handle synchronization of daily preparation tasks with SQLite persistence and milestone recalculation."""
+        session = await sio.get_session(sid)
+        user_id = session.get("userId", "1") if session else "1"
         task_id = data.get("taskId", "")
         tid = int(task_id) if str(task_id).isdigit() else 1
 
         def _toggle_sync():
             with Session(engine) as db_session:
                 rec = recommendation_service.toggle_status(db_session, tid)
-                return (rec.status == "completed") if rec else data.get("isCompleted", False)
+                is_comp = (rec.status == "completed") if rec else data.get("isCompleted", False)
+                pid = rec.patient_id if rec else (int(user_id) if str(user_id).isdigit() else 1)
+                patient = patient_service.get_patient_by_id(db_session, pid)
+                milestones, add_count = patient_service.get_patient_milestones(db_session, pid)
+                streak = patient.streak_count if patient else 5
+                m_dump = [m.model_dump() for m in milestones]
+                return is_comp, streak, m_dump, add_count
 
-        is_completed = await asyncio.to_thread(_toggle_sync)
+        is_completed, streak_count, milestones_data, add_count = await asyncio.to_thread(_toggle_sync)
 
-        print(f"📋 [Task Updated] taskId={task_id}, completed={is_completed}")
+        print(f"📋 [Task Updated] taskId={task_id}, completed={is_completed}, streak={streak_count}, milestones={len(milestones_data)}")
         await redis_cache.delete_pattern("tasks:*")
         await redis_cache.delete_pattern("home:*")
-        await sio.emit("task_sync", {"taskId": task_id, "isCompleted": is_completed}, to=f"user_{sid}")
+        
+        # Broadcast to room and direct sid
+        target_room = f"user_{user_id}"
+        payload = {
+            "taskId": task_id,
+            "isCompleted": is_completed,
+            "streakCount": streak_count,
+            "milestones": milestones_data,
+            "additionalMilestonesCount": add_count,
+        }
+        await sio.emit("task_sync", payload, to=target_room)
+        await sio.emit("user_stats_updated", {
+            "streakCount": streak_count,
+            "milestones": milestones_data,
+            "additionalMilestonesCount": add_count,
+        }, to=target_room)
+

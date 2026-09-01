@@ -32,12 +32,21 @@ except Exception:
 
 # Initialize LangChain Chat Model (Gemma 4 via Ollama)
 try:
-    from langchain_ollama import ChatOllama
-    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:latest")
-    OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.4, timeout=10)
+    # pyrefly: ignore [missing-import]
+    from langchain_openai import ChatOpenAI
+    GPT_MODEL = os.getenv("GPT_MODEL", "gpt-4o")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    llm = ChatOpenAI(model=GPT_MODEL, api_key=OPENAI_API_KEY, temperature=0.4, timeout=15)
 except Exception:
     llm = None
+
+# try:
+#     from langchain_ollama import ChatOllama
+#     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:latest")
+#     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+#     llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.4, timeout=10)
+# except Exception:
+#     llm = None
 
 
 AMY_SYSTEM_PROMPT = """You are Amy, an empathetic, encouraging, and clinically-grounded AI Recovery Coach at Clovo.
@@ -54,7 +63,8 @@ DYNAMIC FOLLOW-UP SUGGESTIONS:
 QUICK_REPLIES: [Short Option 1] | [Short Option 2] | [Short Option 3]
 
 YOUR RESPONSIBILITIES:
-1. Explain the patient's approved daily recommendations and the physiological "Why" using ONLY the clinical library and rationales provided in context.
+1. Explain the patient's approved daily recommendations and the physiological 
+"Why" using ONLY the clinical library and rationales provided in context.
 2. Provide warm encouragement, empathy, and positive reinforcement.
 3. Celebrate completed tasks and progress milestones with enthusiasm.
 4. Keep responses concise, supportive, and easy to read on mobile.
@@ -64,7 +74,8 @@ STRICT CLINICAL BOUNDARIES (DO NOT VIOLATE):
 2. NEVER alter prescribed durations or repetitions.
 3. NEVER diagnose medical conditions or say "You have a tear/infection".
 4. NEVER tell a patient to push through pain, dizziness, or abnormal symptoms.
-5. If the user asks for unapproved medical advice, politely explain that you can only guide approved routines and advise them to consult their clinician.
+5. If the user asks for unapproved medical advice, politely explain that you can 
+only guide approved routines and advise them to consult their clinician.
 
 SAFETY PROTOCOL:
 If the user mentions dizziness, sharp pain, fever, chest pain, or bleeding:
@@ -75,7 +86,7 @@ If the user mentions dizziness, sharp pain, fever, chest pain, or bleeding:
 
 def clean_plain_text(text: str) -> str:
     """
-    Sanitize text to remove markdown formatting symbols (**, *, ###, __)
+    Sanitize text to remove markdown formatting symbols (**, *, ###, __, ——)
     so responses display as clean, natural plain text.
     """
     if not text:
@@ -87,49 +98,63 @@ def clean_plain_text(text: str) -> str:
     text = text.replace('*', '')
     # Remove underscores formatting: __word__ -> word
     text = re.sub(r'_+([^_]+)_+', r'\1', text)
-    # Remove leading dashes/bullet points from list items
-    text = re.sub(r'^\s*[-•]\s+', '', text, flags=re.MULTILINE)
+    # Remove markdown horizontal rules and long dividers: ---, ___, ——, ───
+    text = re.sub(r'^\s*[-_—─]{2,}\s*$', '', text, flags=re.MULTILINE)
+    # Remove leading dashes/bullet points/em-dashes from list items
+    text = re.sub(r'^\s*[-•—–]\s+', '', text, flags=re.MULTILINE)
     # Clean multiple consecutive blank lines
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
 
-def extract_quick_replies(raw_text: str) -> tuple[str, List[str]]:
+def extract_quick_replies(
+    raw_text: str,
+    active_recommendations: Optional[List[Dict[str, Any]]] = None,
+) -> tuple[str, List[str]]:
     """
     Extract dynamic quick replies from the LLM output and return the cleaned text and reply list.
+    Falls back dynamically to the patient's real assigned database tasks instead of hardcoded keywords.
     """
     quick_replies = []
     text = raw_text
 
-    match = re.search(r'QUICK_REPLIES:\s*(.+)$', raw_text, re.MULTILINE | re.IGNORECASE)
+    # 1. Flexible regex to extract whatever dynamic options the LLM returned
+    match = re.search(r'(?:QUICK_REPLIES|SUGGESTED_QUESTIONS|OPTIONS):\s*(.+)$', raw_text, re.MULTILINE | re.IGNORECASE)
     if match:
         replies_str = match.group(1)
-        raw_options = replies_str.split('|')
+        raw_options = replies_str.split('|') if '|' in replies_str else replies_str.split(',')
         for opt in raw_options:
             cleaned = clean_plain_text(opt.strip("[] \t\n\r\"'"))
             if cleaned and len(cleaned) <= 45:
                 quick_replies.append(cleaned)
         text = raw_text[:match.start()].strip()
 
-    # Fallback smart contextual quick replies if LLM omitted them
+    # 2. Database-Driven Fallback: Grounded in patient's actual pending tasks from SQLite
+    if not quick_replies and active_recommendations:
+        pending_titles = [rec.get("title", "") for rec in active_recommendations if rec.get("title")]
+        if pending_titles:
+            first_task = pending_titles[0]
+            quick_replies = [
+                f"How do I do {first_task}?",
+                f"Why is {first_task} helpful?",
+                "What's my next task? 📋",
+                "I'm feeling a bit tired 🥱"
+            ]
+
+    # 3. Universal graceful conversational fallback
     if not quick_replies:
-        lower = text.lower()
-        if any(w in lower for w in ["quad", "stretch", "walk", "exercise"]):
-            quick_replies = ["How many reps? 🔢", "What if I feel tight? 🧘", "Got it, next activity! 👍"]
-        elif any(w in lower for w in ["breath", "anxiety", "calm", "yoga", "stress"]):
-            quick_replies = ["Let's do 4-7-8 Breathing 🧘", "I feel more relaxed now 💙", "What else helps nerves?"]
-        elif any(w in lower for w in ["protein", "snack", "food", "nutrition"]):
-            quick_replies = ["What snacks are best? 🍎", "When should I eat it? ⏱", "Sounds tasty! 😋"]
-        else:
-            quick_replies = ["Sounds good! 👍", "What's next for today? 🗓", "I have 5 mins ⏱"]
+        quick_replies = ["What's my next task? 📋", "Why is this recommended? 💡", "Sounds good! 👍"]
 
     return clean_plain_text(text), quick_replies[:4]
 
+
+from services.response_validator import response_validator
 
 # =========================================================================
 # 1. State Definition (TypedDict)
 # =========================================================================
 class CoachState(TypedDict):
+    session: Any
     patient_id: int
     patient_name: str
     procedure_name: str
@@ -137,6 +162,7 @@ class CoachState(TypedDict):
     user_message: str
     conversation_history: List[Dict[str, str]]
     grounded_library_text: str
+    daily_tasks_summary: str
     available_options: List[Dict[str, Any]]
     active_recommendations: List[Dict[str, Any]]
     # Safety triage fields
@@ -145,14 +171,25 @@ class CoachState(TypedDict):
     risk_level: Optional[str]
     safety_trigger: Optional[str]
     safety_action: Optional[str]
-    # Task completion intent fields
+    # Task completion / unmarking / options intent fields
     is_task_completion: bool
     completed_activity_name: Optional[str]
-    completed_task: Optional[Dict[str, Any]]
-    # Output fields
+    is_task_unmark: bool
+    unmarked_activity_name: Optional[str]
+    should_show_options: bool
+    completed_task_info: Optional[Any]
+    # Adherence & Milestone fields
+    adherence_context: Optional[str]
+    milestones_summary: Optional[str]
+    # Output & Validation fields
     response_text: str
     suggested_options: Optional[List[Dict[str, Any]]]
     quick_replies: List[str]
+    validation_passed: bool
+    validation_flags: List[str]
+
+
+
 
 
 # =========================================================================
@@ -216,15 +253,6 @@ def safety_escalation_node(state: CoachState) -> Dict[str, Any]:
         )
         quick_replies = ["I have sat down to rest 🧘", "I will call NHS 111 📞", "I will call my clinic"]
 
-    elif category == "severe_pain":
-        response_text = (
-            f"That sounds very painful, {name}. Sharp or severe pain is your body's signal to pause. "
-            "Please stop your current exercises and rest your joint immediately without putting weight on it. "
-            "If this is new or worsening pain that doesn't ease after resting, please contact your surgical clinic or NHS 111. "
-            "I have recorded this pain report for your care team. 💙"
-        )
-        quick_replies = ["I've stopped to rest 🧘", "It's new sharp pain", "I will call my clinic"]
-
     elif category == "clinical_decision":
         response_text = (
             f"I understand your concerns about your treatment, {name}, but as your AI Recovery Coach, I cannot make decisions about your medications or alter prescriptions. "
@@ -249,74 +277,290 @@ def safety_escalation_node(state: CoachState) -> Dict[str, Any]:
     }
 
 
+import json
+
+# Prompt template for LLM-based intent classification
+INTENT_CLASSIFICATION_PROMPT = """You are a clinical intent classifier for a patient recovery app.
+
+Given the patient's message and the list of their assigned activities, classify the intent as ONE of:
+- "completion": The patient is confirming they completed an activity (e.g. "I did my quad sets", "finished!", "done", "I'm done with that also", "did that too")
+- "unmark": The patient is saying they did NOT do an activity, or wants to undo/reset it (e.g. "I haven't done it", "I didn't complete that", "undo", "reset my tasks")
+- "view_plan": The patient wants to see or explore their schedule, plan, routine, or activity options (e.g. "What's my plan for today?", "show me my tasks", "options", "what should I do?")
+- "general": Any other general question, greeting, or comment
+
+Also extract which activity they are referring to. Use EXACTLY one of these values:
+{activity_names}
+- Use "all" if they refer to all/every/none of their tasks (e.g. "I haven't done any of them", "completed everything")
+- If the patient refers to "that", "it", or does not repeat the activity name (e.g. "I'm done with that also", "finished that too", "done!"), resolve it to the specific activity discussed in the Recent conversation context.
+- Use null ONLY if no activity can be inferred or the intent is "view_plan" or "general".
+
+Recent conversation context (last coach message):
+{last_coach_message}
+
+Patient message: "{user_message}"
+
+Respond with ONLY valid JSON, no other text:
+{{"intent": "completion" | "unmark" | "view_plan" | "general", "activity": "<exact activity name>" | "all" | null}}"""
+
+
 @observe(name="intent_classification")
 def intent_classification_node(state: CoachState) -> Dict[str, Any]:
     """
-    Node 3: Classify user intent for task completion vs general conversation.
-    Accurately handles negations ('haven't done it yet') and semantic activity extraction.
+    Node 3: Classify user intent using the LLM for robust understanding of
+    task completion, unmarking/reset, plan viewing, and general conversation.
+    Falls back to lightweight heuristics if the LLM is unavailable.
     """
     user_msg = state["user_message"]
     msg_lower = user_msg.lower().strip()
-    history = state.get("conversation_history", [])
     active_recs = state.get("active_recommendations", [])
+    history = state.get("conversation_history", [])
 
-    # 1. Negation detection
-    negation_patterns = [
-        "haven't", "have not", "didn't", "did not", "not yet", "not done",
-        "couldn't", "could not", "can't", "unable to", "haven’t", "didn’t",
-        "no i didn't", "no,"
+    # Option keywords fallback
+    option_keywords = [
+        "energy", "low", "tired", "light", "gentle", "exhausted", "lazy",
+        "surprise", "recommend", "activity", "activities", "exercise", "routine",
+        "schedule", "today", "plan", "options", "what should i do", "what am i working on",
+        "workout", "stretch", "mins", "minute"
     ]
-    is_negated = any(p in msg_lower for p in negation_patterns)
+    keyword_options_triggered = any(w in msg_lower for w in option_keywords)
 
-    # 2. Affirmative completion phrases
-    completion_triggers = [
-        "done", "finished", "completed", "did my", "did the", "knocked out",
-        "just finished", "all done", "marked as complete", "mark as complete",
-        "i did it", "i did them", "i did", "yes i did", "yes completed", "yes finished",
-        "yes", "yeah", "yep", "i did the quad", "i did quad", "i have completed",
-        "i completed", "completed it"
-    ]
-    has_completion_intent = any(t in msg_lower for t in completion_triggers)
+    # Build known activity names from recommendations
+    known_activities = [rec.get("title", "") for rec in active_recs if rec.get("title")]
+    for opt in state.get("available_options", []):
+        title = opt.get("title", "")
+        if title and title not in known_activities and not opt.get("isSpecial"):
+            known_activities.append(title)
 
-    if has_completion_intent and not is_negated:
-        # Match activity entity
-        matched_activity = None
-        if "quad" in msg_lower:
-            matched_activity = "Quad Sets"
-        elif "leg" in msg_lower or "raise" in msg_lower:
-            matched_activity = "Straight Leg Raise"
-        elif "snack" in msg_lower or "protein" in msg_lower:
-            matched_activity = "Protein Power Snack"
-        elif "breath" in msg_lower:
-            matched_activity = "4-7-8 Breathing"
-        elif "all" in msg_lower or "everything" in msg_lower or "both" in msg_lower:
-            matched_activity = "all"
-        else:
-            # Check if previous coach message asked about a specific exercise
-            if history:
-                last_coach_msg = next((m.get("content", "").lower() for m in reversed(history) if m.get("role") in ["coach", "assistant"]), "")
-                if "quad" in last_coach_msg:
-                    matched_activity = "Quad Sets"
-                elif "leg" in last_coach_msg or "raise" in last_coach_msg:
-                    matched_activity = "Straight Leg Raise"
-                elif "snack" in last_coach_msg or "protein" in last_coach_msg:
-                    matched_activity = "Protein Power Snack"
-                elif "breath" in last_coach_msg:
-                    matched_activity = "4-7-8 Breathing"
+    activity_names_str = "\n".join(f'- "{name}"' for name in known_activities) if known_activities else '- (no activities assigned)'
 
-            if not matched_activity and active_recs:
-                matched_activity = active_recs[0].get("title", "Quad Sets")
+    last_coach_msg = ""
+    if history:
+        last_coach_msg = next(
+            (m.get("content", "")[:200] for m in reversed(history) if m.get("role") in ["coach", "assistant"]),
+            ""
+        )
 
-        print(f"🎯 [LangGraph: Intent] Task completion confirmed for activity='{matched_activity}'")
+    if llm:
+        try:
+            prompt = INTENT_CLASSIFICATION_PROMPT.format(
+                activity_names=activity_names_str,
+                last_coach_message=last_coach_msg or "(none)",
+                user_message=user_msg,
+            )
+            response = llm.invoke([
+                SystemMessage(content="You are a precise JSON classifier. Output ONLY valid JSON."),
+                HumanMessage(content=prompt),
+            ])
+
+            if response and response.content:
+                raw = str(response.content).strip()
+                if raw.startswith("```"):
+                    raw = re.sub(r'^```(?:json)?\s*', '', raw)
+                    raw = re.sub(r'\s*```$', '', raw)
+
+                parsed = json.loads(raw)
+                intent = parsed.get("intent", "general")
+                activity = parsed.get("activity")
+
+                # Fallback context inference if intent is completion/unmark but activity came back null
+                if intent == "completion" and not activity:
+                    for act in known_activities:
+                        if act.lower() in last_coach_msg.lower():
+                            activity = act
+                            break
+                    if not activity and active_recs:
+                        activity = active_recs[0].get("title")
+
+                if intent == "unmark" and not activity:
+                    for act in known_activities:
+                        if act.lower() in last_coach_msg.lower():
+                            activity = act
+                            break
+
+                should_show = (intent == "view_plan" or keyword_options_triggered)
+
+                if intent == "completion" and activity:
+                    print(f"🎯 [LangGraph: Intent/LLM] Task completion confirmed for activity='{activity}'")
+                    return {
+                        "is_task_completion": True,
+                        "completed_activity_name": activity,
+                        "is_task_unmark": False,
+                        "unmarked_activity_name": None,
+                        "should_show_options": should_show,
+                    }
+                elif intent == "unmark" and activity:
+                    print(f"🔄 [LangGraph: Intent/LLM] Task unmark/reset detected for activity='{activity}'")
+                    return {
+                        "is_task_completion": False,
+                        "completed_activity_name": None,
+                        "is_task_unmark": True,
+                        "unmarked_activity_name": activity,
+                        "should_show_options": should_show,
+                    }
+                else:
+                    print(f"💬 [LangGraph: Intent/LLM] General / Plan intent: {intent}")
+                    return {
+                        "is_task_completion": False,
+                        "completed_activity_name": None,
+                        "is_task_unmark": False,
+                        "unmarked_activity_name": None,
+                        "should_show_options": should_show,
+                    }
+        except Exception as e:
+            print(f"⚠️ [LangGraph: Intent] LLM classification error ({e}), falling back to heuristics")
+
+    # Fallback to heuristics
+    heuristic = _heuristic_intent_classification(user_msg, active_recs, history)
+    heuristic["should_show_options"] = keyword_options_triggered
+    return heuristic
+
+
+def _heuristic_intent_classification(
+    user_msg: str,
+    active_recs: List[Dict[str, Any]],
+    history: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    """Fallback pattern-matching classifier used only when the LLM is unavailable."""
+    msg_lower = user_msg.lower().strip()
+
+    negation_signals = ["haven't", "have not", "didn't", "did not", "not yet", "not done",
+                        "couldn't", "could not", "unmark", "reset", "undo", "cancel"]
+    is_unmark = any(p in msg_lower for p in negation_signals)
+
+    completion_signals = ["done", "finished", "completed", "did my", "did the",
+                          "just finished", "all done", "i did", "i completed"]
+    is_completion = any(t in msg_lower for t in completion_signals) and not is_unmark
+
+    matched = None
+    if "quad" in msg_lower:
+        matched = "Quad Sets"
+    elif "leg" in msg_lower or "raise" in msg_lower:
+        matched = "Straight Leg Raise"
+    elif "snack" in msg_lower or "protein" in msg_lower:
+        matched = "Protein Power Snack"
+    elif "breath" in msg_lower:
+        matched = "4-7-8 Breathing"
+    elif any(w in msg_lower for w in ["all", "everything", "every", "none of", "any of"]):
+        matched = "all"
+    elif history:
+        for m in reversed(history):
+            if m.get("role") in ["coach", "assistant"]:
+                c_content = m.get("content", "").lower()
+                if "quad" in c_content:
+                    matched = "Quad Sets"
+                elif "leg" in c_content:
+                    matched = "Straight Leg Raise"
+                elif "snack" in c_content or "protein" in c_content:
+                    matched = "Protein Power Snack"
+                elif "breath" in c_content:
+                    matched = "4-7-8 Breathing"
+                break
+
+    if is_unmark and matched:
+        return {
+            "is_task_completion": False,
+            "completed_activity_name": None,
+            "is_task_unmark": True,
+            "unmarked_activity_name": matched,
+        }
+    elif is_completion and matched:
         return {
             "is_task_completion": True,
-            "completed_activity_name": matched_activity,
+            "completed_activity_name": matched,
+            "is_task_unmark": False,
+            "unmarked_activity_name": None,
         }
-
     return {
         "is_task_completion": False,
         "completed_activity_name": None,
+        "is_task_unmark": False,
+        "unmarked_activity_name": None,
     }
+
+
+@observe(name="recommendation_action")
+def recommendation_action_node(state: CoachState) -> Dict[str, Any]:
+    """
+    Node 4: Execute deterministic recommendation state mutations inside the graph
+    for task completions or unmarking.
+    Updates the live checklist and active recommendations in CoachState before coaching generation.
+    """
+    session = state.get("session")
+    patient_id = state["patient_id"]
+    is_completion = state.get("is_task_completion", False)
+    is_unmark = state.get("is_task_unmark", False)
+    completed_task_info = None
+
+    if not session or state.get("is_safety_alert"):
+        return {"completed_task_info": None}
+
+    # 1. Handle Task Completion
+    if is_completion:
+        act_name = state.get("completed_activity_name")
+        updated_rec = recommendation_service.mark_task_completed(
+            session=session,
+            patient_id=patient_id,
+            activity_name=act_name,
+        )
+        if updated_rec:
+            content_obj = session.get(ClinicalContent, updated_rec.content_id)
+            completed_task_info = {
+                "taskId": updated_rec.id,
+                "title": content_obj.title if content_obj else act_name,
+                "isCompleted": True,
+            }
+            print(f"💾 [LangGraph RecommendationAction] Recommendation #{updated_rec.id} marked COMPLETED for patient {patient_id}")
+
+
+    # 2. Handle Task Unmark / Reset
+    elif is_unmark:
+        act_name = state.get("unmarked_activity_name")
+        result = recommendation_service.mark_task_active(
+            session=session,
+            patient_id=patient_id,
+            activity_name=act_name,
+        )
+        reset_recs = result if isinstance(result, list) else ([result] if result else [])
+        if reset_recs:
+            completed_task_info = [
+                {
+                    "taskId": rec.id,
+                    "title": (session.get(ClinicalContent, rec.content_id).title
+                              if session.get(ClinicalContent, rec.content_id) else act_name),
+                    "isCompleted": False,
+                }
+                for rec in reset_recs
+            ]
+            for rec in reset_recs:
+                print(f"🔄 [LangGraph TaskAction] Recommendation #{rec.id} RESET to ACTIVE for patient {patient_id}")
+
+    # 3. Refresh live task statuses in state if mutation occurred
+    updates: Dict[str, Any] = {"completed_task_info": completed_task_info}
+    if completed_task_info:
+        rec_statement = (
+            select(Recommendation, ClinicalContent)
+            .join(ClinicalContent, Recommendation.content_id == ClinicalContent.id)
+            .where(Recommendation.patient_id == patient_id)
+            .order_by(Recommendation.scheduled_date.asc())
+        )
+        rec_results = session.exec(rec_statement).all()
+        task_status_lines = []
+        active_recs = []
+        for rec, c in rec_results:
+            is_comp = (rec.status == "completed")
+            status_lbl = "COMPLETED ✅" if is_comp else "PENDING ⏳"
+            task_status_lines.append(f"- {c.title}: {status_lbl} ({rec.duration_minutes} mins)")
+            if not is_comp:
+                active_recs.append({
+                    "id": rec.id,
+                    "title": c.title,
+                    "type": c.type,
+                    "duration": rec.duration_minutes,
+                })
+        updates["daily_tasks_summary"] = "\n".join(task_status_lines)
+        updates["active_recommendations"] = active_recs
+
+    return updates
 
 
 @observe(as_type="generation", name="coach_amy_llm_inference")
@@ -353,84 +597,78 @@ def invoke_coach_llm(prompt_messages: List[Any], model_name: str) -> Optional[st
 @observe(name="amy_coaching")
 def coaching_node(state: CoachState) -> Dict[str, Any]:
     """
-    Generate grounded, empathetic coaching response using SQLite knowledge library.
-    Celebrates completed tasks and falls back gracefully to rich grounded templates.
+    Node 5: Generate grounded, empathetic coaching response using SQLite knowledge library.
+    Unified prompt assembly with full multi-turn conversation history across all intents.
     """
     name = state["patient_name"]
     procedure = state["procedure_name"]
     days = state["days_away"]
     user_msg = state["user_message"]
-    msg_lower = user_msg.lower()
     clinical_library = state.get("grounded_library_text", "")
+    daily_tasks = state.get("daily_tasks_summary", "")
     db_options = state.get("available_options", [])
-    completed_task = state.get("completed_task")
+    active_recs = state.get("active_recommendations", [])
+    history = state.get("conversation_history", [])
+
+    is_completion = state.get("is_task_completion", False)
+    completed_task_name = state.get("completed_activity_name")
+    is_unmark = state.get("is_task_unmark", False)
+    unmarked_activity = state.get("unmarked_activity_name")
+    should_show_options = state.get("should_show_options", False)
 
     time_context = f"in {days} days" if days is not None else "in your recovery journey"
 
-    # Check if the user is asking for activity options
-    option_keywords = [
-        "energy", "low", "tired", "light", "gentle", "exhausted", "lazy",
-        "surprise", "recommend", "activity", "activities", "exercise", "routine",
-        "schedule", "today", "plan", "options", "what should i do", "what am i working on",
-        "workout", "stretch", "mins", "minute"
-    ]
-    should_show_options = any(w in msg_lower for w in option_keywords)
-    suggested_options = db_options if should_show_options else None
-
-    # Handle explicit task completion celebration
-    if completed_task:
-        task_title = completed_task.get("title", "your recovery routine")
-        if llm:
-            try:
-                prompt_context = (
-                    f"Patient Profile: {name} (Preparing for {procedure} {time_context}).\n"
-                    f"EVENT: The patient has just confirmed completing their routine: '{task_title}'.\n"
-                    f"Approved Clinical Content & Physiological Rationales:\n{clinical_library}\n\n"
-                    f"INSTRUCTIONS: Enthusiastically celebrate their achievement in 2-3 warm, clear sentences. "
-                    f"Explain how completing {task_title} helps their surgical recovery, and ask how they're feeling or suggest their next step."
-                )
-                prompt_messages: List[Any] = [
-                    SystemMessage(content=AMY_SYSTEM_PROMPT),
-                    HumanMessage(content=prompt_context),
-                    HumanMessage(content=f"Patient says: \"{user_msg}\""),
-                ]
-                llm_text = invoke_coach_llm(prompt_messages, OLLAMA_MODEL)
-                if llm_text:
-                    reply_text, dynamic_replies = extract_quick_replies(llm_text)
-                    return {
-                        "response_text": reply_text,
-                        "suggested_options": None,
-                        "quick_replies": dynamic_replies or ["What's my next task? 📋", "Feeling good! 😊", "How did that help me? 💡"],
-                    }
-            except Exception as e:
-                print(f"⚠️ [LangChain LLM Completion Fallback] {e}")
-
-        # Deterministic Grounded Celebration Fallback
-        response_text = (
-            f"Awesome job, {name}! 🎉 I've marked {task_title} as completed in your daily recovery checklist. "
-            f"Every bit of preparation strengthens your body and brings you one step closer to a smooth {procedure} recovery 💙. "
-            "How are you feeling right now?"
+    # 1. Assemble dynamic instruction based on intent
+    if is_completion and completed_task_name:
+        event_instruction = (
+            f"EVENT: The patient has confirmed completing their routine: '{completed_task_name}'.\n"
+            f"INSTRUCTIONS: Enthusiastically celebrate their achievement in 2-3 warm, clear sentences. "
+            f"Explain how completing {completed_task_name} helps their surgical recovery, and ask how they're feeling or suggest their next step."
         )
-        return {
-            "response_text": clean_plain_text(response_text),
-            "suggested_options": None,
-            "quick_replies": ["Feeling good! 😊", "A bit tired but okay 👍", "What's my next task? 📋"],
-        }
+    elif is_unmark and unmarked_activity:
+        event_instruction = (
+            f"EVENT: The patient stated they have NOT completed or wish to reset their routine: '{unmarked_activity}'.\n"
+            f"INSTRUCTIONS: Reassure {name} warmly in 2-3 sentences that it is completely fine to take their time or reset a task. "
+            f"Confirm that you've reset {unmarked_activity} on their checklist to pending. "
+            f"Gently explain why {unmarked_activity} is helpful when they feel ready, and ask how they'd like to proceed."
+        )
+    elif should_show_options:
+        event_instruction = (
+            f"INSTRUCTIONS: The patient wants to see or explore today's recovery activities. "
+            f"Introduce today's approved routines warmly in 2-3 sentences. Highlight what's pending vs completed, "
+            f"and encourage them to pick what feels best for their energy level today."
+        )
+    else:
+        event_instruction = (
+            f"INSTRUCTIONS: Respond empathetically, encouragingly, and clinically grounded in 2-4 sentences. "
+            f"Address their message directly, staying within approved clinical boundaries."
+        )
 
-    # 1. Primary LLM Grounded Generation
+    # 2. Primary LLM Generation with FULL Multi-Turn History
+    adherence_ctx = state.get("adherence_context")
+    milestone_ctx = state.get("milestones_summary")
+    adherence_prompt_line = f"\nADHERENCE & STREAK CONTEXT:\n{adherence_ctx}\n" if adherence_ctx else ""
+    milestone_prompt_line = f"\nPATIENT ACHIEVEMENTS & MILESTONES:\n{milestone_ctx}\n" if milestone_ctx else ""
+
     if llm:
         try:
             prompt_context = (
                 f"Patient Profile: {name} (Preparing for {procedure} {time_context}).\n\n"
-                f"Approved Clinical Content & Physiological Rationales (From Database):\n"
-                f"{clinical_library}"
+                f"Today's Assigned Daily Tasks & Real-Time Statuses (Updated Live):\n{daily_tasks}\n"
+                f"{adherence_prompt_line}"
+                f"{milestone_prompt_line}\n"
+                f"Approved Clinical Content & Physiological Rationales (From Database):\n{clinical_library}\n\n"
+                f"TASK AWARENESS & EVENT RULES:\n"
+                f"1. Refer to the real-time task statuses above.\n"
+                f"2. {event_instruction}"
             )
-            prompt_messages = [
+            prompt_messages: List[Any] = [
                 SystemMessage(content=AMY_SYSTEM_PROMPT),
                 HumanMessage(content=prompt_context),
             ]
 
-            history = state.get("conversation_history", [])
+
+            # Append multi-turn history for all conversational intents
             if history:
                 for turn in history[-6:]:
                     role = turn.get("role", "user")
@@ -443,24 +681,39 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
 
             prompt_messages.append(HumanMessage(content=f"Patient says: \"{user_msg}\""))
 
-            llm_text = invoke_coach_llm(prompt_messages, OLLAMA_MODEL)
+            llm_text = invoke_coach_llm(prompt_messages, GPT_MODEL)
             if llm_text:
-                reply_text, dynamic_replies = extract_quick_replies(llm_text)
+                reply_text, dynamic_replies = extract_quick_replies(llm_text, active_recs)
                 return {
                     "response_text": reply_text,
-                    "suggested_options": suggested_options,
+                    "suggested_options": db_options if should_show_options else None,
                     "quick_replies": dynamic_replies,
+                    "completed_task_info": state.get("completed_task_info"),
                 }
         except Exception as e:
-            print(f"⚠️ [LangChain LLM Fallback] {e}")
+            print(f"⚠️ [LangChain LLM Unified Coaching Fallback] {e}")
 
-    # 2. Grounded DB Fallback Template
-    if "surprise" in msg_lower or any(w in msg_lower for w in ["energy", "low", "tired", "light", "gentle"]):
+    # 3. Deterministic Grounded Fallbacks (if LLM is unavailable or fails)
+    if is_completion and completed_task_name:
         response_text = (
-            f"Great attitude, {name}! Since today's a lower-energy day, I've switched up your options to keep things light. "
-            "Pick what feels best—something to stretch, move, or just reset. 💙"
+            f"Awesome job, {name}! 🎉 I've marked {completed_task_name} as completed in your daily recovery checklist. "
+            f"Every bit of preparation strengthens your body and brings you one step closer to a smooth {procedure} recovery 💙. "
+            "How are you feeling right now?"
         )
-        quick_replies = ["Gentle stretch sounds great! 🧘", "I'll do the 15 min walk 🚶", "Can we do 5 mins? ⏱"]
+        quick_replies = ["Feeling good! 😊", "A bit tired but okay 👍", "What's my next task? 📋"]
+    elif is_unmark and unmarked_activity:
+        response_text = (
+            f"No problem at all, {name}! 💙 I've reset {unmarked_activity} to pending on your daily checklist. "
+            "Progress isn't about rushing; it's about listening to your body and staying consistent when you feel ready. "
+            f"Whenever you feel up for doing your {unmarked_activity}, let me know and we can do it together! 🌟"
+        )
+        quick_replies = ["Let's do it now! 💪", "Show other options 📋", "I'll do it later 👍"]
+    elif should_show_options:
+        response_text = (
+            f"Here are your approved daily recovery activities for today, {name}! 🌟 "
+            "Pick what feels best for your energy level right now—we can take it one step at a time. 💙"
+        )
+        quick_replies = ["Let's start! 💪", "Tell me more about Quad Sets", "Surprise me! 🎁"]
     else:
         time_msg = f"With your {procedure} {days} days away, consistent" if days is not None else f"For your {procedure} preparation, consistent"
         response_text = (
@@ -472,8 +725,44 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
 
     return {
         "response_text": clean_plain_text(response_text),
-        "suggested_options": suggested_options,
+        "suggested_options": db_options if should_show_options else None,
         "quick_replies": quick_replies,
+        "completed_task_info": state.get("completed_task_info"),
+    }
+
+
+@observe(name="response_validation")
+def response_validation_node(state: CoachState) -> Dict[str, Any]:
+    """
+    Node 6: Post-LLM Clinical Response Validator & Output Guardrail (SaMD / Class IIa).
+    Audits generated response against regulatory clinical rules before patient delivery.
+    """
+    raw_response = state.get("response_text", "")
+    patient_name = state.get("patient_name", "Sarah")
+    procedure = state.get("procedure_name", "Knee Surgery")
+
+    # Run clinical validation
+    val_result = response_validator.validate(
+        text=raw_response,
+        patient_name=patient_name,
+        procedure=procedure,
+    )
+
+    if not val_result.is_valid:
+        print(f"🚨 [LangGraph ResponseValidator] BLOCKED! Flags: {val_result.flags}")
+        updates: Dict[str, Any] = {
+            "response_text": val_result.sanitized_text,
+            "validation_passed": False,
+            "validation_flags": val_result.flags,
+        }
+        if val_result.suggested_quick_replies:
+            updates["quick_replies"] = val_result.suggested_quick_replies
+        return updates
+
+    return {
+        "response_text": val_result.sanitized_text,
+        "validation_passed": True,
+        "validation_flags": val_result.flags,
     }
 
 
@@ -486,14 +775,16 @@ def route_safety(state: CoachState) -> str:
 
 
 def build_coach_graph():
-    """Build and compile the LangGraph pipeline."""
+    """Build and compile the LangGraph pipeline with in-graph recommendation actions & response validation."""
     graph = StateGraph(CoachState)
 
     # Add Nodes
     graph.add_node("safety_triage", safety_triage_node)
     graph.add_node("safety_escalation", safety_escalation_node)
     graph.add_node("intent_classification", intent_classification_node)
+    graph.add_node("recommendation_action", recommendation_action_node)
     graph.add_node("coaching", coaching_node)
+    graph.add_node("response_validation", response_validation_node)
 
     # Add Edges
     graph.add_edge(START, "safety_triage")
@@ -505,11 +796,15 @@ def build_coach_graph():
             "intent_classification": "intent_classification",
         },
     )
-    graph.add_edge("intent_classification", "coaching")
+    graph.add_edge("intent_classification", "recommendation_action")
+    graph.add_edge("recommendation_action", "coaching")
+    graph.add_edge("coaching", "response_validation")
+    graph.add_edge("response_validation", END)
     graph.add_edge("safety_escalation", END)
-    graph.add_edge("coaching", END)
 
     return graph.compile()
+
+
 
 
 # =========================================================================
@@ -539,10 +834,10 @@ class AmyCoachService:
         if langfuse_context:
             try:
                 langfuse_context.update_current_trace(
-                    name=f"Amy Coaching Session: {patient.name or 'Sarah'}",
+                    name=f"Amy Coaching: {patient.name or 'Sarah'}",
                     session_id=f"conv-{conversation.id}",
                     user_id=f"patient-{patient.id}",
-                    tags=["amy_coach", patient.procedure or "wellness", f"phase_{patient.phase or 'active'}"],
+                    tags=["amy_coach", patient.procedure or "wellness", f"plan_{patient.plan or 'Pre-Op'}"],
                     metadata={
                         "patient_id": patient.id,
                         "patient_name": patient.name,
@@ -554,8 +849,8 @@ class AmyCoachService:
                 langfuse_context.update_current_observation(
                     input={"user_message": user_message}
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"⚠️ [Langfuse Trace Update Error]: {e}")
 
         days_away: Optional[int] = None
         if patient.procedure_date:
@@ -576,6 +871,7 @@ class AmyCoachService:
         # 2. Build activity options and active recommendations
         available_options = []
         active_recommendations = []
+        task_status_lines = []
         rec_statement = (
             select(Recommendation, ClinicalContent)
             .join(ClinicalContent, Recommendation.content_id == ClinicalContent.id)
@@ -587,6 +883,9 @@ class AmyCoachService:
         if rec_results:
             for rec, c in rec_results:
                 is_completed = (rec.status == "completed")
+                status_label = "COMPLETED ✅" if is_completed else "PENDING ⏳"
+                task_status_lines.append(f"- {c.title}: {status_label} ({rec.duration_minutes} mins)")
+
                 if not is_completed:
                     active_recommendations.append({
                         "id": rec.id,
@@ -608,6 +907,8 @@ class AmyCoachService:
                     "isCompleted": is_completed,
                 })
 
+        daily_tasks_summary = "\n".join(task_status_lines) if task_status_lines else "No tasks assigned for today."
+
         # Add surprise option card
         available_options.append({
             "id": "content-surprise",
@@ -620,6 +921,25 @@ class AmyCoachService:
 
         # 3. Load persistent multi-turn conversation history
         from services.conversation_service import conversation_service
+        from services.patient_service import patient_service
+
+        # Audit adherence (flag missed tasks and count streak)
+        adherence_info = patient_service.audit_daily_adherence_and_missed_tasks(session, patient.id)
+        milestones_list, add_count = patient_service.get_patient_milestones(session, patient.id)
+
+        adherence_context_str = (
+            f"- Current Streak: {patient.streak_count} days 🔥\n"
+            f"- Total Completed Tasks: {patient.total_completed_tasks or len(milestones_list)}\n"
+        )
+        if adherence_info.get("has_missed_yesterday"):
+            missed_str = ", ".join(adherence_info.get("missed_yesterday_titles", []))
+            adherence_context_str += (
+                f"- NOTE: Patient missed {missed_str} yesterday. "
+                "If relevant or asked, offer gentle encouragement (no guilt/shame), explain the clinical rationale, and encourage a fresh start today.\n"
+            )
+
+        milestones_context_str = ", ".join([m.title for m in milestones_list[:5]]) if milestones_list else "Starting recovery journey"
+
         raw_history = conversation_service.get_messages(session, conversation.id)
         conversation_history = [
             {"role": msg.role, "content": msg.content}
@@ -628,6 +948,7 @@ class AmyCoachService:
 
         # Execute through compiled LangGraph
         initial_state: CoachState = {
+            "session": session,
             "patient_id": patient.id,
             "patient_name": patient.name or "Sarah",
             "procedure_name": patient.procedure or "Knee Surgery",
@@ -635,8 +956,11 @@ class AmyCoachService:
             "user_message": user_message,
             "conversation_history": conversation_history,
             "grounded_library_text": grounded_library_text,
+            "daily_tasks_summary": daily_tasks_summary,
             "available_options": available_options,
             "active_recommendations": active_recommendations,
+            "adherence_context": adherence_context_str,
+            "milestones_summary": milestones_context_str,
             "is_safety_alert": False,
             "safety_category": None,
             "risk_level": None,
@@ -644,7 +968,10 @@ class AmyCoachService:
             "safety_action": None,
             "is_task_completion": False,
             "completed_activity_name": None,
-            "completed_task": None,
+            "is_task_unmark": False,
+            "unmarked_activity_name": None,
+            "should_show_options": False,
+            "completed_task_info": None,
             "response_text": "",
             "suggested_options": None,
             "quick_replies": [],
@@ -652,24 +979,7 @@ class AmyCoachService:
 
         result_state: CoachState = self.graph.invoke(initial_state)
 
-        # If task completion intent was identified, execute database mutation
-        completed_task_info = None
-        if result_state.get("is_task_completion") and not result_state.get("is_safety_alert"):
-            act_name = result_state.get("completed_activity_name")
-            updated_rec = recommendation_service.mark_task_completed(
-                session=session,
-                patient_id=patient.id,
-                activity_name=act_name,
-            )
-            if updated_rec:
-                # Find matching content title
-                content_obj = session.get(ClinicalContent, updated_rec.content_id)
-                completed_task_info = {
-                    "taskId": updated_rec.id,
-                    "title": content_obj.title if content_obj else act_name,
-                    "isCompleted": True,
-                }
-                print(f"💾 [Database Updated] Recommendation #{updated_rec.id} marked COMPLETED for patient {patient.id}")
+        completed_task_info = result_state.get("completed_task_info")
 
         # If safety alert triggered, record to SQLite database for clinician triage
         if result_state.get("is_safety_alert"):
@@ -681,6 +991,17 @@ class AmyCoachService:
                 risk_level=result_state.get("risk_level", "high"),
                 action=result_state.get("safety_action", "Alert care team and advise rest"),
             )
+        elif adherence_info.get("requires_clinician_alert"):
+            # Record low-risk adherence alert for care team cockpit
+            safety_service.record_event(
+                session=session,
+                conversation_id=conversation.id,
+                patient_id=patient.id,
+                trigger=f"Pre-Op Adherence Alert: {adherence_info.get('consecutive_missed_days')} consecutive days missed",
+                risk_level="low",
+                action="Notify clinical care team / nurse for follow-up check-in",
+            )
+
 
         final_clean_text = clean_plain_text(result_state["response_text"])
         print(f"📤 [Coach Amy Response Ready] Clean text length: {len(final_clean_text)} chars | Completed Task: {completed_task_info}\n")

@@ -43,8 +43,29 @@ class SocketService {
 
     this.socket.on('task_sync', (data: any) => {
       console.log('📋 [Socket.IO] Received task_sync:', data);
+      if (data.streakCount !== undefined || data.milestones !== undefined) {
+        import('@/stores/useUserStore').then(({ useUserStore }) => {
+          useUserStore.getState().updateStats({
+            streakCount: data.streakCount,
+            milestones: data.milestones,
+            additionalMilestonesCount: data.additionalMilestonesCount,
+          });
+        });
+      }
       this.taskSyncListeners.forEach((listener) => listener(data));
     });
+
+    this.socket.on('user_stats_updated', (data: any) => {
+      console.log('🌟 [Socket.IO] Received user_stats_updated:', data);
+      import('@/stores/useUserStore').then(({ useUserStore }) => {
+        useUserStore.getState().updateStats({
+          streakCount: data.streakCount,
+          milestones: data.milestones,
+          additionalMilestonesCount: data.additionalMilestonesCount,
+        });
+      });
+    });
+
 
     this.socket.on('disconnect', (reason) => {
       console.log('❌ [Socket.IO] Disconnected from server. Reason:', reason);

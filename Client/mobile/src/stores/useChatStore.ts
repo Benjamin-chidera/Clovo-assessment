@@ -92,6 +92,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
       }
 
+      // If voice mode is active and message is from coach, speak the response aloud
+      // and automatically resume listening for the next user turn
+      if (message.sender === 'coach' && message.text) {
+        import('@/stores/useVoiceStore').then(({ useVoiceStore }) => {
+          const voiceState = useVoiceStore.getState();
+          if (voiceState.isVoiceModeEnabled) {
+            voiceState.speakAndThenListen(message.text);
+          }
+        }).catch(() => {});
+      }
+
       return {
         messages: [...state.messages, message],
         quickReplies: updatedQuickReplies,
@@ -105,20 +116,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const timeString = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const userMsgId = `msg-user-${Date.now()}`;
 
+    // Voice session trigger: don't show any user message in the chat
+    // thread — just send to server and show typing indicator
+    const isVoiceTrigger = text.trim() === '[VOICE_SESSION_START]';
+
     console.log(`💬 [Mobile Chat] Sending: "${text}"`);
 
-    const newMessage: ChatMessage = {
-      id: userMsgId,
-      sender: 'user',
-      text,
-      timestamp: timeString,
-    };
+    if (isVoiceTrigger) {
+      // Only show typing indicator, no user message bubble
+      set({ isTyping: true });
+    } else {
+      const newMessage: ChatMessage = {
+        id: userMsgId,
+        sender: 'user',
+        text,
+        timestamp: timeString,
+      };
 
-    // 1. Immediately show user message in the thread & show typing indicator
-    set((state) => ({
-      messages: [...state.messages, newMessage],
-      isTyping: true,
-    }));
+      // 1. Immediately show user message in the thread & show typing indicator
+      set((state) => ({
+        messages: [...state.messages, newMessage],
+        isTyping: true,
+      }));
+    }
 
     // 2. Primary Transport: Emit over Socket.IO if connected
     if (socketService.isConnected()) {

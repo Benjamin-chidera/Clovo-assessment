@@ -15,12 +15,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useChatStore } from '@/stores/useChatStore';
+import { useVoiceStore } from '@/stores/useVoiceStore';
 
 export const ChatInputBar: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const insets = useSafeAreaInsets();
   const { quickReplies, sendMessage } = useChatStore();
+  const isVoiceActive = useVoiceStore((s) => s.isVoiceModeEnabled);
+  const isListening = useVoiceStore((s) => s.isListening);
+  const isSpeaking = useVoiceStore((s) => s.isSpeaking);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -115,6 +119,60 @@ export const ChatInputBar: React.FC = () => {
             autoCorrect
             accessibilityLabel="Chat input"
           />
+
+          {/* Hands-Free Voice Mic Button */}
+          <TouchableOpacity
+            className={`w-9 h-9 rounded-full justify-center items-center mr-1.5 ${
+              isVoiceActive
+                ? 'bg-red-50 border border-red-300'
+                : 'bg-[#F1F5F9] active:bg-[#E2E8F0]'
+            }`}
+            onPress={() => {
+              if (Platform.OS !== 'web') {
+                try {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                } catch {
+                  // ignore
+                }
+              }
+              const voiceStore = useVoiceStore.getState();
+              if (voiceStore.isVoiceModeEnabled) {
+                if (voiceStore.isSpeaking) {
+                  // Amy is speaking -> tap mic to interrupt Amy immediately & open mic
+                  voiceStore.interruptAndListen();
+                } else if (voiceStore.isListening) {
+                  // User is speaking -> tap mic to finish & send immediately without waiting
+                  voiceStore.stopListening();
+                } else {
+                  // Idle in voice mode -> deactivate
+                  voiceStore.deactivateVoiceConversation();
+                }
+              } else {
+                // Start voice conversation — Amy speaks first, then listens
+                voiceStore.activateVoiceConversation((text: string) => {
+                  sendMessage(text);
+                });
+              }
+            }}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isVoiceActive
+                ? isSpeaking
+                  ? 'Interrupt Amy and speak'
+                  : isListening
+                  ? 'Finish speaking and send'
+                  : 'Stop voice mode'
+                : 'Start voice conversation with Amy'
+            }
+          >
+            <Ionicons
+              name={isVoiceActive ? 'mic' : 'mic-outline'}
+              size={18}
+              color={isVoiceActive ? '#EF4444' : '#475569'}
+            />
+          </TouchableOpacity>
+
 
           {/* Right Arrow / Send Circular Button */}
           <TouchableOpacity

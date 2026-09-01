@@ -1,6 +1,17 @@
 import { apiClient } from './api';
 import { DailyTask, TaskCategory } from '@/stores/useTaskStore';
 
+export interface MilestoneResponse {
+  id: string;
+  code: string;
+  title: string;
+  description?: string;
+  icon_name: string;
+  color: string;
+  bg_gradient: [string, string];
+  unlocked_at?: string;
+}
+
 export interface UserProfileResponse {
   id: string;
   name: string;
@@ -13,6 +24,9 @@ export interface UserProfileResponse {
   days_away: number;
   procedure_name?: string;
   procedure_date?: string;
+  milestones?: MilestoneResponse[];
+  additional_milestones_count?: number;
+  total_completed_tasks?: number;
 }
 
 export interface TaskItemResponse {
@@ -42,8 +56,13 @@ export interface HomeDataResponse {
   days_away: number;
   procedure_name?: string;
   procedure_date?: string;
+  streak_count?: number;
+  milestones?: MilestoneResponse[];
+  additional_milestones_count?: number;
+  total_completed_tasks?: number;
   preparations: PreparationItemResponse[];
 }
+
 
 export const apiService = {
   /**

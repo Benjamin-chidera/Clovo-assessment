@@ -27,7 +27,11 @@ export const RecoveryActivityCards: React.FC<RecoveryActivityCardsProps> = ({
 
   const handleCardPress = (card: ActivityCard) => {
     if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch {
+        // Silently ignore — Haptics can fail during navigation transitions
+      }
     }
     selectActivity(card);
   };
@@ -50,13 +54,20 @@ export const RecoveryActivityCards: React.FC<RecoveryActivityCardsProps> = ({
         return (
           <TouchableOpacity
             key={card.id}
-            className={`w-full bg-white rounded-2xl p-2.5 flex-row items-center border ${
-              isCompleted
-                ? "border-emerald-300 bg-emerald-50/20"
+            style={{
+              width: '100%',
+              flexDirection: 'row',
+              alignItems: 'center',
+              padding: 10,
+              borderRadius: 16,
+              borderWidth: 1,
+              backgroundColor: isCompleted ? 'rgba(236, 253, 245, 0.2)' : '#FFFFFF',
+              borderColor: isCompleted
+                ? '#6EE7B7'
                 : isSelected
-                ? "border-[#3B49DF] bg-blue-50/20"
-                : "border-gray-100 shadow-sm"
-            }`}
+                ? '#3B49DF'
+                : '#F3F4F6',
+            }}
             onPress={() => handleCardPress(card)}
             activeOpacity={0.8}
             accessibilityRole="button"
