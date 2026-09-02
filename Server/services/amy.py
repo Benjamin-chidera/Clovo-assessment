@@ -296,8 +296,8 @@ INTENT_CLASSIFICATION_PROMPT = """You are a clinical intent classifier for a pat
 Given the patient's message and the list of their assigned activities, classify the intent as ONE of:
 - "completion": The patient is confirming they completed an activity (e.g. "I did my quad sets", "finished!", "done", "I'm done with that also", "did that too")
 - "unmark": The patient is saying they did NOT do an activity, or wants to undo/reset it (e.g. "I haven't done it", "I didn't complete that", "undo", "reset my tasks")
-- "view_plan": The patient wants to see or explore their schedule, plan, routine, or activity options (e.g. "What's my plan for today?", "show me my tasks", "options", "what should I do?")
-- "general": Any other general question, greeting, or comment
+- "view_plan": The patient explicitly wants to see, browse, or explore their schedule, tasks, plan, or recovery activity cards (e.g. "What's my plan for today?", "show me my tasks", "show options", "what routines do I have?", "what should I do now?", "what am I working on today?")
+- "general": Any other general question, technique explanation, greeting, emotional support/motivation, or comment
 
 Also extract which activity they are referring to. Use EXACTLY one of these values:
 {activity_names}
@@ -326,14 +326,17 @@ def intent_classification_node(state: CoachState) -> Dict[str, Any]:
     active_recs = state.get("active_recommendations", [])
     history = state.get("conversation_history", [])
 
-    # Option keywords fallback
-    option_keywords = [
-        "energy", "low", "tired", "light", "gentle", "exhausted", "lazy",
-        "surprise", "recommend", "activity", "activities", "exercise", "routine",
-        "schedule", "today", "plan", "options", "what should i do", "what am i working on",
-        "workout", "stretch", "mins", "minute"
+    # Explicit plan viewing phrases (used only as fallback when LLM is offline)
+    explicit_plan_phrases = [
+        "what's my plan", "whats my plan", "what is my plan", "my plan today",
+        "show me my tasks", "show my tasks", "show tasks", "my tasks",
+        "show options", "show my options", "show activities", "show my activities",
+        "show routine", "show routines", "show my routine", "show my routines",
+        "what should i do", "what am i working on", "view plan", "view tasks",
+        "what's on my schedule", "whats on my schedule", "what is on my schedule",
+        "show today's routine", "show todays routine", "surprise me"
     ]
-    keyword_options_triggered = any(w in msg_lower for w in option_keywords)
+    is_explicit_plan_request = any(p in msg_lower for p in explicit_plan_phrases)
 
     # Build known activity names from recommendations
     known_activities = [rec.get("title", "") for rec in active_recs if rec.get("title")]
@@ -388,7 +391,8 @@ def intent_classification_node(state: CoachState) -> Dict[str, Any]:
                             activity = act
                             break
 
-                should_show = (intent == "view_plan" or keyword_options_triggered)
+                # Intelligently show cards ONLY when the intent is explicitly view_plan
+                should_show = (intent == "view_plan")
 
                 if intent == "completion" and activity:
                     print(f"🎯 [LangGraph: Intent/LLM] Task completion confirmed for activity='{activity}'")
@@ -409,7 +413,7 @@ def intent_classification_node(state: CoachState) -> Dict[str, Any]:
                         "should_show_options": should_show,
                     }
                 else:
-                    print(f"💬 [LangGraph: Intent/LLM] General / Plan intent: {intent}")
+                    print(f"💬 [LangGraph: Intent/LLM] General / Plan intent: {intent} (Show Cards: {should_show})")
                     return {
                         "is_task_completion": False,
                         "completed_activity_name": None,
@@ -420,9 +424,9 @@ def intent_classification_node(state: CoachState) -> Dict[str, Any]:
         except Exception as e:
             print(f"⚠️ [LangGraph: Intent] LLM classification error ({e}), falling back to heuristics")
 
-    # Fallback to heuristics
+    # Fallback to heuristics when LLM is unavailable
     heuristic = _heuristic_intent_classification(user_msg, active_recs, history)
-    heuristic["should_show_options"] = keyword_options_triggered
+    heuristic["should_show_options"] = is_explicit_plan_request
     return heuristic
 
 
