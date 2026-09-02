@@ -82,7 +82,7 @@ SAFETY PROTOCOL:
 If the user mentions dizziness, sharp pain, fever, chest pain, or bleeding:
 - Instruct them to stop the activity immediately and rest.
 - Direct severe emergencies to 999 or NHS 111.
-"""
+""" 
 
 
 def clean_plain_text(text: str) -> str:
