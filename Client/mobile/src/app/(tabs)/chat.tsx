@@ -36,17 +36,17 @@ export default function ChatScreen() {
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
 
   const renderItem = useCallback(
-    ({ item, index }: { item: ChatMessage; index: number }) => (
-      <MessageBubble
-        message={item}
-        showTimestamp={
-          index === reversedMessages.length - 1 ||
-          item.timestamp !== reversedMessages[index + 1]?.timestamp
-        }
-      />
-    ),
+    ({ item, index }: { item: ChatMessage; index: number }) => {
+      const isLast = index === reversedMessages.length - 1;
+      const nextItem = reversedMessages[index + 1];
+      const showTimestamp = isLast || item.timestamp !== nextItem?.timestamp;
+
+      return <MessageBubble message={item} showTimestamp={showTimestamp} />;
+    },
     [reversedMessages]
   );
+
+  const keyExtractor = useCallback((item: ChatMessage) => item.id, []);
 
   return (
     <View className="flex-1 bg-[#F8F9FD]">
@@ -64,11 +64,11 @@ export default function ChatScreen() {
           ref={flatListRef}
           data={reversedMessages}
           inverted
-          keyExtractor={(item) => item.id}
+          keyExtractor={keyExtractor}
           renderItem={renderItem}
-          initialNumToRender={15}
-          maxToRenderPerBatch={10}
-          windowSize={7}
+          initialNumToRender={10}
+          maxToRenderPerBatch={8}
+          windowSize={5}
           removeClippedSubviews={false}
           ListHeaderComponent={
             isTyping ? (

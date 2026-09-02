@@ -9,7 +9,7 @@ interface MessageBubbleProps {
   showTimestamp?: boolean;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({
+const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
   message,
   showTimestamp = true,
 }) => {
@@ -92,3 +92,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     </View>
   );
 };
+
+export const MessageBubble = React.memo(MessageBubbleComponent, (prev, next) => {
+  return (
+    prev.message.id === next.message.id &&
+    prev.showTimestamp === next.showTimestamp &&
+    prev.message.text === next.message.text &&
+    prev.message.isSafetyAlert === next.message.isSafetyAlert &&
+    prev.message.options === next.message.options
+  );
+});

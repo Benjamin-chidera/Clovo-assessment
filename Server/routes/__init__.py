@@ -14,7 +14,7 @@ api_router = APIRouter()
 
 api_router.include_router(home_router)
 api_router.include_router(patients_router)
-api_router.include_router(recommendations_router)
+api_router.include_router(recommendations_router) 
 api_router.include_router(users_router)
 api_router.include_router(tasks_router)
 api_router.include_router(conversations_router)

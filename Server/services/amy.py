@@ -67,7 +67,8 @@ YOUR RESPONSIBILITIES:
 "Why" using ONLY the clinical library and rationales provided in context.
 2. Provide warm encouragement, empathy, and positive reinforcement.
 3. Celebrate completed tasks and progress milestones with enthusiasm.
-4. Keep responses concise, supportive, and easy to read on mobile.
+4. Support emotional adherence: When patients feel sad, down, unmotivated, or overwhelmed, provide genuine human empathy, validate their feelings without judgment, remove guilt, and offer gentle restorative options (like 4-7-8 breathing or rest).
+5. Keep responses concise, supportive, and easy to read on mobile.
 
 STRICT CLINICAL BOUNDARIES (DO NOT VIOLATE):
 1. NEVER invent unapproved exercises, diets, medications, or alternative treatments.
@@ -110,6 +111,7 @@ def clean_plain_text(text: str) -> str:
 def extract_quick_replies(
     raw_text: str,
     active_recommendations: Optional[List[Dict[str, Any]]] = None,
+    is_emotional_support: bool = False,
 ) -> tuple[str, List[str]]:
     """
     Extract dynamic quick replies from the LLM output and return the cleaned text and reply list.
@@ -129,7 +131,16 @@ def extract_quick_replies(
                 quick_replies.append(cleaned)
         text = raw_text[:match.start()].strip()
 
-    # 2. Database-Driven Fallback: Grounded in patient's actual pending tasks from SQLite
+    # 2. Emotional support fallback
+    if not quick_replies and is_emotional_support:
+        quick_replies = [
+            "I'll take a rest day 🧘",
+            "Guide me in 4-7-8 breathing 🌬️",
+            "Tell me about my progress 🌟",
+            "Thank you Amy 💙"
+        ]
+
+    # 3. Database-Driven Fallback: Grounded in patient's actual pending tasks from SQLite
     if not quick_replies and active_recommendations:
         pending_titles = [rec.get("title", "") for rec in active_recommendations if rec.get("title")]
         if pending_titles:
@@ -141,7 +152,7 @@ def extract_quick_replies(
                 "I'm feeling a bit tired 🥱"
             ]
 
-    # 3. Universal graceful conversational fallback
+    # 4. Universal graceful conversational fallback
     if not quick_replies:
         quick_replies = ["What's my next task? 📋", "Why is this recommended? 💡", "Sounds good! 👍"]
 
@@ -618,6 +629,16 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
 
     time_context = f"in {days} days" if days is not None else "in your recovery journey"
 
+    # Detect low mood, sadness, fatigue, or low motivation
+    low_mood_signals = [
+        "sad", "feeling sad", "really sad", "down", "feeling down", "unmotivated",
+        "no motivation", "don't feel like", "dont feel like", "lazy", "feel lazy",
+        "discouraged", "hard day", "crying", "feel like crying", "overwhelmed",
+        "exhausted", "giving up", "too hard", "struggling today", "cant do this",
+        "cannot do this", "not feeling it", "hopeless", "blue"
+    ]
+    is_emotional_support = any(sig in user_msg.lower() for sig in low_mood_signals)
+
     # 1. Assemble dynamic instruction based on intent
     if is_completion and completed_task_name:
         event_instruction = (
@@ -631,6 +652,15 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
             f"INSTRUCTIONS: Reassure {name} warmly in 2-3 sentences that it is completely fine to take their time or reset a task. "
             f"Confirm that you've reset {unmarked_activity} on their checklist to pending. "
             f"Gently explain why {unmarked_activity} is helpful when they feel ready, and ask how they'd like to proceed."
+        )
+    elif is_emotional_support:
+        event_instruction = (
+            f"EVENT: The patient expressed sadness, low energy, or low motivation ('{user_msg}').\n"
+            f"INSTRUCTIONS: Respond as a deeply caring, empathetic, and human-like recovery coach in 2-3 warm sentences:\n"
+            f"1. Warmly validate and normalize their feelings: reassure {name} that recovery is emotionally demanding with ups and downs, and feeling sad, tired, or unmotivated is completely natural and valid.\n"
+            f"2. Remove all pressure or guilt: reassure them that resting and mental wellbeing are just as critical for surgical healing as physical exercises.\n"
+            f"3. Offer a gentle, restorative option: suggest taking today as a guilt-free restorative rest day, or trying just 2 minutes of gentle 4-7-8 breathing if they want a soothing moment.\n"
+            f"4. Reassure them: 'I'm right here with you, {name}. No pressure at all. 💙'"
         )
     elif should_show_options:
         event_instruction = (
@@ -683,7 +713,7 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
 
             llm_text = invoke_coach_llm(prompt_messages, GPT_MODEL)
             if llm_text:
-                reply_text, dynamic_replies = extract_quick_replies(llm_text, active_recs)
+                reply_text, dynamic_replies = extract_quick_replies(llm_text, active_recs, is_emotional_support)
                 return {
                     "response_text": reply_text,
                     "suggested_options": db_options if should_show_options else None,
@@ -708,6 +738,13 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
             f"Whenever you feel up for doing your {unmarked_activity}, let me know and we can do it together! 🌟"
         )
         quick_replies = ["Let's do it now! 💪", "Show other options 📋", "I'll do it later 👍"]
+    elif is_emotional_support:
+        response_text = (
+            f"I hear you, {name}, and I want you to know it is completely okay to feel sad and have days where your energy is low 💙. "
+            "Recovery is an emotional journey, and listening to your feelings and resting is just as important for your healing as physical exercises. "
+            "Would you like to take today as a restful recovery day, or perhaps try 2 minutes of gentle 4-7-8 breathing together? No pressure at all, I'm right here with you."
+        )
+        quick_replies = ["I'll take a rest day 🧘", "Guide me in 4-7-8 breathing 🌬️", "Tell me about my progress 🌟", "Thank you Amy 💙"]
     elif should_show_options:
         response_text = (
             f"Here are your approved daily recovery activities for today, {name}! 🌟 "
