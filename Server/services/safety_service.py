@@ -16,7 +16,7 @@ FALLBACK_SAFETY_PATTERNS = [
     (r"\b(hit (my )?head|head injury|concussion|fell (down|over)|fall on|injured my)\b", "acute_medical", "high", "Head trauma or fall reported", "Stop all activity immediately, rest, and contact NHS 111 or surgical clinic"),
     (r"\b(fever|infected|infection|pus|oozing|red streak|hot to (the )?touch|calf swelling|dvt)\b", "acute_medical", "high", "Surgical wound infection / DVT risk", "Alert clinical care team and contact clinic or NHS 111"),
     (r"\b(thrown? (all )?(my )?med|stop(ping)? (my )?med|flushed (my )?pills|skip(ping)? (blood )?thinner|change (my )?dosage|prescribe)\b", "clinical_decision", "low", "Medication discontinuation / out-of-scope request", "Refuse clinical decision-making and advise consulting prescribing doctor"),
-    (r"\b(pain (\d{1,2}|is [89]|is 10)|unbearable pain|severe pain|sharp (stabbing )?pain)\b", "severe_pain", "medium", "High / unbearable pain level", "Validate pain, pause joint loading, and advise contacting physiotherapy team"),
+    (r"\b(pain (is (an? )?)?\d{1,2}|unbearable pain|severe pain|sharp (stabbing )?pain|\b([89]|10)\s*(out of|\/)\s*10)\b", "severe_pain", "medium", "High / unbearable pain level", "Validate pain, pause joint loading, and advise contacting physiotherapy team"),
     (r"\b(severe dizziness|vertigo|blacking out)\b", "acute_medical", "high", "Severe dizziness / fall risk", "Sit down immediately, rest, and contact NHS 111"),
 ]
 
