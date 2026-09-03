@@ -8,9 +8,12 @@ import { useChatStore, ChatMessage } from '@/stores/useChatStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { socketService } from '@/services/socketService';
 
+import { useTaskStore } from '@/stores/useTaskStore';
+
 export default function ChatScreen() {
   const router = useRouter();
   const { messages, isLoading, isTyping, fetchMessages } = useChatStore();
+  const { fetchTasks } = useTaskStore();
   const { isAuthenticated, user } = useAuthStore();
   const flatListRef = useRef<FlatList>(null);
 
@@ -21,8 +24,9 @@ export default function ChatScreen() {
       const patientId = user?.id || 'patient-sarah';
       socketService.connect(patientId);
       fetchMessages(patientId);
+      fetchTasks(patientId);
     }
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, user?.id, fetchTasks]);
 
   const handleBack = () => {
     if (router.canGoBack()) {
