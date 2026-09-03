@@ -294,8 +294,10 @@ class RecommendationService:
 
             act_lower = activity_name.lower().strip()
 
-            # The intent classification node in amy.py normalises bulk-reset phrases to "all"
-            reset_all = (act_lower == "all")
+            # The intent classification node in amy.py normalises bulk-reset phrases to "all",
+            # but the LLM may also return synonyms like "any", "none", or "everything".
+            BULK_RESET_SYNONYMS = {"all", "any", "none", "everything", "every", "all tasks"}
+            reset_all = (act_lower in BULK_RESET_SYNONYMS)
 
             if reset_all:
                 reset_recs = []

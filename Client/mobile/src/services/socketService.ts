@@ -8,13 +8,30 @@ class SocketService {
   private coachMessageListeners: MessageListener[] = [];
   private taskSyncListeners: MessageListener[] = [];
 
+  /**
+   * Track which socket instance has listeners attached to avoid duplicates
+   * but ensure we re-attach when the socket instance changes.
+   */
+  private attachedSocketId: string | null = null;
+
   public isConnected(): boolean {
     return Boolean(this.socket && this.socket.connected);
   }
 
   public connect(userId: string): Socket {
+    // If already connected with the same socket, just return it
     if (this.socket && this.socket.connected) {
+      // Ensure listeners are attached even on early return
+      this.ensureListenersAttached();
       return this.socket;
+    }
+
+    // Disconnect stale socket before creating a new one
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+      this.attachedSocketId = null;
     }
 
     const serverUrl = getBackendUrl();
@@ -31,6 +48,36 @@ class SocketService {
       reconnectionDelay: 1000,
       timeout: 20000,
     });
+
+    // Attach all internal event forwarders to this new socket instance
+    this.attachedSocketId = null; // Force re-attach
+    this.ensureListenersAttached();
+
+    return this.socket;
+  }
+
+  /**
+   * Attach socket-level event listeners that forward to registered callbacks.
+   * Idempotent: only attaches once per socket instance (tracked by an internal key).
+   * Must be called after this.socket is set.
+   */
+  private ensureListenersAttached(): void {
+    if (!this.socket) return;
+
+    // Use a stable internal tag to track whether we already attached to this
+    // exact socket object. socket.id is undefined until the connect event fires,
+    // so we tag the instance ourselves.
+    const instanceKey = (this.socket as any)._instanceKey;
+    if (!instanceKey) {
+      (this.socket as any)._instanceKey = `sock_${Date.now()}`;
+    }
+
+    const currentKey = (this.socket as any)._instanceKey;
+    if (this.attachedSocketId === currentKey) {
+      return; // Already attached to this exact socket instance
+    }
+
+    this.attachedSocketId = currentKey;
 
     this.socket.on('connect', () => {
       console.log('✅ [Socket.IO] Connected to Clovo Server. ID:', this.socket?.id);
@@ -66,7 +113,6 @@ class SocketService {
       });
     });
 
-
     this.socket.on('disconnect', (reason) => {
       console.log('❌ [Socket.IO] Disconnected from server. Reason:', reason);
     });
@@ -74,8 +120,6 @@ class SocketService {
     this.socket.on('connect_error', (error) => {
       console.warn('⚠️ [Socket.IO] Connection error:', error.message);
     });
-
-    return this.socket;
   }
 
   public onCoachMessage(callback: MessageListener): () => void {
@@ -94,8 +138,10 @@ class SocketService {
 
   public disconnect(): void {
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
+      this.attachedSocketId = null;
     }
   }
 
