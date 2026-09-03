@@ -114,7 +114,7 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
         await sio.emit("coach_message", coach_reply, to=sid)
 
         # Broadcast real-time task completion event if marked by Amy
-        completed_task_data = coach_output.get("completed_task_info")
+        completed_task_data = coach_output.get("completed_task")
         if completed_task_data:
             # Normalise to a list — single-task completions arrive as a dict, bulk resets as a list
             task_list = completed_task_data if isinstance(completed_task_data, list) else [completed_task_data]
