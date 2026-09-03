@@ -319,6 +319,8 @@ def migrate_db_columns() -> None:
         # Check patients table columns
         cursor.execute("PRAGMA table_info(patients)")
         patient_cols = [row[1] for row in cursor.fetchall()]
+        if "phase" not in patient_cols:
+            cursor.execute("ALTER TABLE patients ADD COLUMN phase TEXT DEFAULT 'pre-op'")
         if "last_active_date" not in patient_cols:
             cursor.execute("ALTER TABLE patients ADD COLUMN last_active_date DATE")
         if "total_completed_tasks" not in patient_cols:
@@ -342,8 +344,8 @@ def create_db_and_tables() -> None:
     """
     import models  # noqa: F401
 
-    SQLModel.metadata.create_all(engine)
     migrate_db_columns()
+    SQLModel.metadata.create_all(engine)
 
     with Session(engine) as session:
         # 1. Seed clinical content library
@@ -352,10 +354,10 @@ def create_db_and_tables() -> None:
         # 2. Seed milestone catalog
         seed_milestones(session)
 
-        # 3. Seed initial patient (Sarah) and personalized recommendations
+        # 3. Seed initial patients (Sarah & Jane) and personalized recommendations
         from services.patient_service import patient_service
 
-        patient_service.get_or_create_default_patient(session)
+        patient_service.seed_default_patients(session)
 
 
 
