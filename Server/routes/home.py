@@ -14,12 +14,12 @@ SessionDep = Annotated[Session, Depends(get_session)]
 @router.get("", response_model=PatientHomeData)
 def get_home_dashboard(
     session: SessionDep,
-    patient_id: Annotated[Optional[int], Query(description="Optional patient ID")] = None,
+    patient_id: Annotated[Optional[str], Query(description="Optional patient ID or identifier (e.g., patient-jane, 1, 2)")] = None,
 ) -> PatientHomeData:
     """
     Get dashboard data for the mobile Home screen:
     - Greeting: 'Good morning, Sarah'
-    - Surgery countdown: '21 days away'
-    - Today's preparation tasks with evidence-based clinical content
+    - Surgery countdown: '21 days away' (or 'Day 6 Post-Op')
+    - Today's preparation/rehabilitation tasks with evidence-based clinical content
     """
     return patient_service.get_patient_home_data(session, patient_id)

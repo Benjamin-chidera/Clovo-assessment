@@ -32,6 +32,19 @@ class TestApiEndpoints:
         assert "preparations" in data
         assert len(data["preparations"]) > 0
         assert data["days_away"] >= 0
+        assert data["phase"] == "pre-op"
+
+    async def test_get_home_data_jane_post_op(self, client: AsyncClient):
+        """SRV-INT-API-005: GET /api/home?patient_id=patient-jane returns post-op knee rehabilitation data."""
+        response = await client.get("/api/home?patient_id=patient-jane")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["patient_name"] == "Jane"
+        assert data["phase"] == "post-op"
+        assert data["days_post_op"] is not None and data["days_post_op"] >= 1
+        assert "Post-Op" in data["surgery_title"]
+        assert len(data["preparations"]) > 0
+        assert any("Ankle Pumps" in p["title"] for p in data["preparations"])
 
     async def test_recommendation_action_complete(self, client: AsyncClient):
         """SRV-INT-API-002: PATCH /api/recommendations/{id}/toggle marks task complete in database."""

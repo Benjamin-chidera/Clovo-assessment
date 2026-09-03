@@ -68,11 +68,10 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
             user_text = "Hi Amy, I just started a voice conversation with you. Please greet me warmly and ask how I'm feeling today. Keep it brief and conversational since we're talking by voice."
 
         print(f"💬 [Message] From {user_id}: {user_text}")
-        pid = int(user_id) if str(user_id).isdigit() else 1
 
         def _process_sync():
             with Session(engine) as db_session:
-                patient = patient_service.get_patient_by_id(db_session, pid) or patient_service.get_or_create_default_patient(db_session)
+                patient = patient_service.resolve_patient(db_session, user_id)
                 conv = conversation_service.get_or_create_conversation(db_session, patient.id)
 
                 # 1. Persist user message
@@ -94,10 +93,10 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
                     db_session,
                     Message(conversation_id=conv.id, role="coach", content=coach_output["text"]),
                 )
-                return coach_output, saved_reply.id
+                return coach_output, saved_reply.id, patient.id, patient.name, patient.procedure or "Knee Surgery"
 
         # Offload synchronous SQLite queries and LLM generation to background threadpool
-        coach_output, reply_id = await asyncio.to_thread(_process_sync)
+        coach_output, reply_id, patient_db_id, patient_db_name, patient_procedure = await asyncio.to_thread(_process_sync)
 
         timestamp = datetime.now().strftime("%-I:%M %p")
         coach_reply = {
@@ -111,10 +110,11 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
             "quickReplies": coach_output.get("quick_replies", []),
         }
 
+        # Send response to the client
         await sio.emit("coach_message", coach_reply, to=sid)
 
-        # Broadcast real-time task sync (completion/unmarking) event to Mobile Home and Chat stores
-        completed_task_data = coach_output.get("completed_task")
+        # Broadcast real-time task completion event if marked by Amy
+        completed_task_data = coach_output.get("completed_task_info")
         if completed_task_data:
             # Normalise to a list — single-task completions arrive as a dict, bulk resets as a list
             task_list = completed_task_data if isinstance(completed_task_data, list) else [completed_task_data]
@@ -124,8 +124,8 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
 
             def _get_stats():
                 with Session(engine) as db_session:
-                    p = patient_service.get_patient_by_id(db_session, pid)
-                    milestones, add_count = patient_service.get_patient_milestones(db_session, pid)
+                    p = patient_service.resolve_patient(db_session, user_id)
+                    milestones, add_count = patient_service.get_patient_milestones(db_session, p.id)
                     streak = p.streak_count if p else 0
                     m_dump = [m.model_dump() for m in milestones]
                     return streak, m_dump, add_count
@@ -156,10 +156,10 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
         if coach_output.get("is_safety_alert"):
             alert_payload = {
                 "id": reply_id,
-                "patient_id": pid,
-                "patient_name": "Sarah Jenkins",
-                "procedure": "Knee Surgery",
-                "conversation_id": "conv-1",
+                "patient_id": patient_db_id,
+                "patient_name": patient_db_name,
+                "procedure": patient_procedure,
+                "conversation_id": f"conv-{patient_db_id}",
                 "risk_level": coach_output.get("risk_level", "high"),
                 "trigger": user_text,
                 "action": "Alert care team and advise immediate rest",
@@ -181,11 +181,10 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
         activity_id = data.get("activityId", "")
 
         print(f"🎯 [Activity Selected] User={user_id}: '{activity_title}' ({activity_id})")
-        pid = int(user_id) if str(user_id).isdigit() else 1
 
         def _process_activity_sync():
             with Session(engine) as db_session:
-                patient = patient_service.get_patient_by_id(db_session, pid) or patient_service.get_or_create_default_patient(db_session)
+                patient = patient_service.resolve_patient(db_session, user_id)
                 conv = conversation_service.get_or_create_conversation(db_session, patient.id)
 
                 # 1. Save user selection message to database
@@ -258,8 +257,8 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
             with Session(engine) as db_session:
                 rec = recommendation_service.toggle_status(db_session, tid)
                 is_comp = (rec.status == "completed") if rec else data.get("isCompleted", False)
-                pid = rec.patient_id if rec else (int(user_id) if str(user_id).isdigit() else 1)
-                patient = patient_service.get_patient_by_id(db_session, pid)
+                patient = patient_service.resolve_patient(db_session, user_id)
+                pid = rec.patient_id if rec else patient.id
                 milestones, add_count = patient_service.get_patient_milestones(db_session, pid)
                 streak = patient.streak_count if patient else 5
                 m_dump = [m.model_dump() for m in milestones]

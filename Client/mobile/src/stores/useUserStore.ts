@@ -19,9 +19,11 @@ export interface UserState {
   email: string;
   avatarUri: string;
   plan: string;
+  phase: string;
   greeting: string;
   surgeryTitle: string;
   daysAway: number;
+  daysPostOp?: number;
   procedureName: string;
   streakCount: number;
   completedDays: number[];
@@ -92,9 +94,11 @@ export const useUserStore = create<UserState>((set) => ({
   email: 'sarah@clovo.app',
   avatarUri: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80',
   plan: 'Pre-Op Preparation',
+  phase: 'pre-op',
   greeting: 'Good morning',
   surgeryTitle: 'Your surgery',
   daysAway: 21,
+  daysPostOp: undefined,
   procedureName: 'Knee Surgery',
   streakCount: 0,
   completedDays: [],
@@ -136,10 +140,12 @@ export const useUserStore = create<UserState>((set) => ({
         email: user.email || 'sarah@clovo.app',
         avatarUri: user.avatar_uri || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80',
         plan: user.plan || 'Pre-Op Preparation',
+        phase: user.phase || 'pre-op',
         streakCount: user.streak_count ?? 5,
         greeting: user.greeting ? user.greeting.split(',')[0] : 'Good morning',
         surgeryTitle: user.surgery_title || 'Your surgery',
         daysAway: user.days_away ?? 21,
+        daysPostOp: user.days_post_op,
         procedureName: user.procedure_name || 'Knee Surgery',
         badges: parsedBadges,
         additionalMilestonesCount: addCount,
@@ -168,6 +174,8 @@ export const useUserStore = create<UserState>((set) => ({
         greeting: data.greeting ? data.greeting.split(',')[0] : 'Good morning',
         surgeryTitle: data.surgery_title || 'Your surgery',
         daysAway: data.days_away ?? 21,
+        daysPostOp: data.days_post_op,
+        phase: data.phase || 'pre-op',
         procedureName: data.procedure_name || 'Knee Surgery',
         streakCount: data.streak_count ?? 5,
         badges: parsedBadges,

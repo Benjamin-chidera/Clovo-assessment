@@ -7,38 +7,68 @@ export interface AuthUser {
   email: string;
   avatarUri: string;
   plan: string;
+  phase: 'pre-op' | 'post-op';
+  procedureName: string;
+  stageBadge: string;
 }
 
-export interface AuthState {
-  isAuthenticated: boolean;
-  user: AuthUser | null;
-  isProfileModalOpen: boolean;
-  login: () => void;
-  logout: () => void;
-  openProfileModal: () => void;
-  closeProfileModal: () => void;
-}
-
-const DEFAULT_USER: AuthUser = {
+export const PRE_OP_USER: AuthUser = {
   id: 'patient-sarah',
   name: 'Sarah',
   email: 'sarah@clovo.app',
   avatarUri: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80',
   plan: 'Pre-Op Preparation',
+  phase: 'pre-op',
+  procedureName: 'Knee Surgery',
+  stageBadge: 'Pre-Op Preparation',
 };
+
+export const POST_OP_USER: AuthUser = {
+  id: 'patient-jane',
+  name: 'Jane',
+  email: 'jane@clovo.app',
+  avatarUri: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&q=80',
+  plan: 'Post-Op Rehabilitation',
+  phase: 'post-op',
+  procedureName: 'Knee Replacement',
+  stageBadge: 'Day 6 Post-Op Rehab',
+};
+
+export interface AuthState {
+  isAuthenticated: boolean;
+  user: AuthUser | null;
+  isProfileModalOpen: boolean;
+  login: (user?: AuthUser) => void;
+  switchUser: (user: AuthUser) => void;
+  logout: () => void;
+  openProfileModal: () => void;
+  closeProfileModal: () => void;
+}
 
 export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
-  user: DEFAULT_USER,
+  user: PRE_OP_USER,
   isProfileModalOpen: false,
 
-  login: () => {
+  login: (selectedUser = PRE_OP_USER) => {
     // Initiate Socket.IO connection immediately upon login
-    useSocketStore.getState().connect(DEFAULT_USER.id);
+    useSocketStore.getState().connect(selectedUser.id);
 
     set({
       isAuthenticated: true,
-      user: DEFAULT_USER,
+      user: selectedUser,
+      isProfileModalOpen: false,
+    });
+  },
+
+  switchUser: (selectedUser: AuthUser) => {
+    // Reconnect socket to new user session
+    useSocketStore.getState().disconnect();
+    useSocketStore.getState().connect(selectedUser.id);
+
+    set({
+      user: selectedUser,
+      isAuthenticated: true,
       isProfileModalOpen: false,
     });
   },

@@ -71,3 +71,36 @@ class TestPatientService:
         assert len(home_data.preparations) > 0
         assert home_data.days_away >= 0
         assert home_data.streak_count >= 0
+        assert home_data.phase == "pre-op"
+
+    def test_resolve_patient_multi_user(self, db_session: Session):
+        """SRV-UNIT-PAT-005: resolve_patient correctly distinguishes Sarah (pre-op) and Jane (post-op)."""
+        sarah_by_str = patient_service.resolve_patient(db_session, "patient-sarah")
+        assert sarah_by_str.name == "Sarah"
+        assert sarah_by_str.phase == "pre-op"
+
+        jane_by_str = patient_service.resolve_patient(db_session, "patient-jane")
+        assert jane_by_str.name == "Jane"
+        assert jane_by_str.phase == "post-op"
+
+        jane_by_name = patient_service.resolve_patient(db_session, "Jane")
+        assert jane_by_name.id == jane_by_str.id
+
+    def test_jane_post_op_home_and_profile_data(self, db_session: Session):
+        """SRV-UNIT-PAT-006: Jane's profile and home data reflect Day 6 Post-Op knee rehabilitation."""
+        jane = patient_service.get_or_create_post_op_patient(db_session)
+        profile = patient_service.get_user_profile(db_session, jane.id)
+        assert profile.name == "Jane"
+        assert profile.phase == "post-op"
+        assert profile.days_post_op is not None and profile.days_post_op >= 1
+        assert "Post-Op" in profile.surgery_title
+
+        home_data = patient_service.get_patient_home_data(db_session, "patient-jane")
+        assert home_data.patient_name == "Jane"
+        assert home_data.phase == "post-op"
+        assert "Post-Op" in home_data.surgery_title
+        # Verify Jane's preparations are post-op clinical content
+        post_op_titles = [prep.title for prep in home_data.preparations]
+        assert any("Ankle Pumps" in t for t in post_op_titles)
+        assert any("Heel Slides" in t for t in post_op_titles)
+

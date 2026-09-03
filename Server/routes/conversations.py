@@ -80,16 +80,13 @@ def build_options_from_db(session: Session, patient_id: Optional[int] = None) ->
 @router.get("/api/conversations/messages")
 def get_conversation_messages(
     session: SessionDep,
-    patient_id: Optional[int] = None,
+    patient_id: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """
     Get all chat messages for the patient's active conversation from the database.
     If no messages exist, seed a welcoming intro message from Coach Amy.
     """
-    if patient_id is None:
-        patient = patient_service.get_or_create_default_patient(session)
-    else:
-        patient = patient_service.get_patient_by_id(session, patient_id) or patient_service.get_or_create_default_patient(session)
+    patient = patient_service.resolve_patient(session, patient_id)
 
     conv = conversation_service.get_or_create_conversation(session, patient.id)
     messages = conversation_service.get_messages(session, conv.id)
@@ -99,11 +96,18 @@ def get_conversation_messages(
 
     # If new conversation has no messages, create initial greeting with today's options
     if not messages:
-        welcome_text = (
-            f"Hi {patient.name}! 👋 I'm Amy, your AI Recovery Coach. "
-            f"I'm here to support your preparation for your {patient.procedure or 'surgery'}. "
-            "How does your body feel today? Here are today's approved routines from your care team—pick what feels best to start! 💙"
-        )
+        if patient.phase == "post-op":
+            welcome_text = (
+                f"Hi {patient.name}! 👋 I'm Amy, your AI Recovery Coach. "
+                f"I'm here to support your rehabilitation following your {patient.procedure or 'knee replacement'}. "
+                "How does your knee feel today? Here are today's approved recovery routines from your care team—let's take it one step at a time! 💙"
+            )
+        else:
+            welcome_text = (
+                f"Hi {patient.name}! 👋 I'm Amy, your AI Recovery Coach. "
+                f"I'm here to support your preparation for your {patient.procedure or 'surgery'}. "
+                "How does your body feel today? Here are today's approved routines from your care team—pick what feels best to start! 💙"
+            )
         welcome_msg = conversation_service.add_message(
             session,
             Message(conversation_id=conv.id, role="coach", content=welcome_text),
@@ -153,10 +157,7 @@ def send_chat_message(
     user_text = payload.get("text", "")
     patient_id = payload.get("patient_id")
 
-    if patient_id is None:
-        patient = patient_service.get_or_create_default_patient(session)
-    else:
-        patient = patient_service.get_patient_by_id(session, patient_id) or patient_service.get_or_create_default_patient(session)
+    patient = patient_service.resolve_patient(session, patient_id)
 
     conv = conversation_service.get_or_create_conversation(session, patient.id)
 

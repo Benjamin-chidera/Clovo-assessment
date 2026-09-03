@@ -34,8 +34,8 @@ export interface ChatState {
   isTyping: boolean;
   selectedCardId: string | null;
   quickReplies: string[];
-  fetchMessages: (patientId?: number) => Promise<void>;
-  sendMessage: (text: string, patientId?: number) => Promise<void>;
+  fetchMessages: (patientId?: number | string) => Promise<void>;
+  sendMessage: (text: string, patientId?: number | string) => Promise<void>;
   selectActivity: (card: ActivityCard) => void;
   addIncomingMessage: (message: ChatMessage) => void;
   setQuickReplies: (replies: string[]) => void;
@@ -59,11 +59,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  fetchMessages: async (patientId?: number) => {
+  fetchMessages: async (patientId?: number | string) => {
     try {
       set({ isLoading: true });
       const url = patientId
-        ? `/api/conversations/messages?patient_id=${patientId}`
+        ? `/api/conversations/messages?patient_id=${encodeURIComponent(patientId)}`
         : '/api/conversations/messages';
       const response = await apiClient.get<ChatMessage[]>(url);
       if (response.data && Array.isArray(response.data)) {
@@ -111,7 +111,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  sendMessage: async (text: string, patientId?: number) => {
+  sendMessage: async (text: string, patientId?: number | string) => {
     const now = new Date();
     const timeString = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const userMsgId = `msg-user-${Date.now()}`;

@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 from sqlmodel import Session, select
 from models.recommendation import (
     Recommendation,
@@ -48,15 +48,13 @@ class RecommendationService:
         return session.get(Recommendation, recommendation_id)
 
     @staticmethod
-    def get_tasks_for_user(session: Session, patient_id: Optional[int] = None) -> List[TaskItemData]:
+    def get_tasks_for_user(session: Session, patient_id: Optional[Any] = None) -> List[TaskItemData]:
         """
         Return formatted task checklist for a patient for mobile tasks display.
         """
         from services.patient_service import patient_service
 
-        patient = patient_service.get_patient_by_id(session, patient_id) if patient_id else None
-        if not patient:
-            patient = patient_service.get_or_create_default_patient(session)
+        patient = patient_service.resolve_patient(session, patient_id)
 
         statement = (
             select(Recommendation, ClinicalContent)

@@ -15,7 +15,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 @router.get("/api/users/me", response_model=UserProfileData)
 def get_current_user(
     session: SessionDep,
-    patient_id: Annotated[Optional[int], Query(description="Optional patient ID")] = None,
+    patient_id: Annotated[Optional[str], Query(description="Optional patient ID or identifier")] = None,
 ) -> UserProfileData:
     """
     Get user profile data for the active patient from the database.

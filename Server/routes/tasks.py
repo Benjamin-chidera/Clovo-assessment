@@ -14,7 +14,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 @router.get("/api/tasks", response_model=List[TaskItemData])
 def get_tasks(
     session: SessionDep,
-    patient_id: Annotated[Optional[int], Query(description="Optional patient ID")] = None,
+    patient_id: Annotated[Optional[str], Query(description="Optional patient ID or identifier")] = None,
 ) -> List[TaskItemData]:
     """
     Get daily tasks/preparations for the active user from the database.

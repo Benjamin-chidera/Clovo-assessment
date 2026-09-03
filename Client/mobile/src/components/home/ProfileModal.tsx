@@ -12,12 +12,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import { useAuthStore } from '@/stores/useAuthStore';
+import { useAuthStore, PRE_OP_USER, POST_OP_USER, AuthUser } from '@/stores/useAuthStore';
+import { useUserStore } from '@/stores/useUserStore';
+import { useChatStore } from '@/stores/useChatStore';
 
 export const ProfileModal: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { isProfileModalOpen, user, logout, closeProfileModal } = useAuthStore();
+  const { isProfileModalOpen, user, logout, switchUser, closeProfileModal } = useAuthStore();
+  const { fetchHomeData, fetchUser } = useUserStore();
+  const { fetchMessages } = useChatStore();
 
   if (!isProfileModalOpen) {
     return null;
@@ -28,6 +32,23 @@ export const ProfileModal: React.FC = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     closeProfileModal();
+  };
+
+  const handleSwitchPatient = async (targetUser: AuthUser) => {
+    if (targetUser.id === user?.id) {
+      return;
+    }
+    if (Platform.OS !== 'web') {
+      Haptics.selectionAsync();
+    }
+    switchUser(targetUser);
+    closeProfileModal();
+    // Fetch data for newly switched patient
+    await Promise.all([
+      fetchHomeData(targetUser.id),
+      fetchUser(targetUser.id),
+      fetchMessages(targetUser.id === 'patient-jane' ? 2 : 1),
+    ]);
   };
 
   const handleLogout = () => {
@@ -85,52 +106,83 @@ export const ProfileModal: React.FC = () => {
               {/* Profile Switch Section */}
               <View className="mt-4">
                 <Text className="text-xs font-bold text-[#6B7280] uppercase tracking-wider mb-2.5">
-                  Profiles
+                  Care Pathway Profiles
                 </Text>
 
+                {/* Sarah (Pre-Op) */}
                 <TouchableOpacity
-                  className="flex-row items-center justify-between py-3 px-3.5 rounded-2xl bg-[#EEF2FF] mb-2 border border-[#E0E7FF]"
+                  className={`flex-row items-center justify-between py-3 px-3.5 rounded-2xl mb-2 border ${
+                    user?.id === PRE_OP_USER.id
+                      ? 'bg-[#EEF2FF] border-[#E0E7FF]'
+                      : 'bg-gray-50 border-gray-100'
+                  }`}
                   activeOpacity={0.8}
+                  onPress={() => handleSwitchPatient(PRE_OP_USER)}
                 >
-                  <View className="flex-row items-center">
-                    <View className="w-8.5 h-8.5 rounded-full bg-white justify-center items-center mr-3">
-                      <Ionicons name="person" size={16} color="#3B49DF" />
-                    </View>
-                    <View>
-                      <Text className="text-sm font-semibold text-[#111827]">
-                        Personal Space
-                      </Text>
+                  <View className="flex-row items-center flex-1 mr-2">
+                    <Image
+                      source={{ uri: PRE_OP_USER.avatarUri }}
+                      className="w-9 h-9 rounded-full mr-3 border border-gray-200"
+                    />
+                    <View className="flex-1">
+                      <View className="flex-row items-center gap-1.5">
+                        <Text className="text-sm font-semibold text-[#111827]">
+                          Sarah
+                        </Text>
+                        <View className="bg-blue-100 px-1.5 py-0.5 rounded-full">
+                          <Text className="text-[9px] font-bold text-blue-700 uppercase">
+                            Pre-Op
+                          </Text>
+                        </View>
+                      </View>
                       <Text className="text-xs text-[#6B7280] mt-0.5">
-                        Daily recovery & streak
+                        Knee Surgery • 21 Days Away
                       </Text>
                     </View>
                   </View>
-                  <Ionicons name="checkmark-circle" size={20} color="#3B49DF" />
+                  {user?.id === PRE_OP_USER.id ? (
+                    <Ionicons name="checkmark-circle" size={20} color="#3B49DF" />
+                  ) : (
+                    <Ionicons name="radio-button-off" size={18} color="#9CA3AF" />
+                  )}
                 </TouchableOpacity>
 
+                {/* Jane (Post-Op) */}
                 <TouchableOpacity
-                  className="flex-row items-center justify-between py-3 px-3.5 rounded-2xl bg-gray-50 mb-2 border border-gray-100"
+                  className={`flex-row items-center justify-between py-3 px-3.5 rounded-2xl mb-2 border ${
+                    user?.id === POST_OP_USER.id
+                      ? 'bg-[#EEF2FF] border-[#E0E7FF]'
+                      : 'bg-gray-50 border-gray-100'
+                  }`}
                   activeOpacity={0.8}
-                  onPress={() => {
-                    if (Platform.OS !== 'web') {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    }
-                  }}
+                  onPress={() => handleSwitchPatient(POST_OP_USER)}
                 >
-                  <View className="flex-row items-center">
-                    <View className="w-8.5 h-8.5 rounded-full bg-gray-200 justify-center items-center mr-3">
-                      <Ionicons name="people-outline" size={16} color="#6B7280" />
-                    </View>
-                    <View>
-                      <Text className="text-sm font-semibold text-[#111827]">
-                        Family & Friends
-                      </Text>
+                  <View className="flex-row items-center flex-1 mr-2">
+                    <Image
+                      source={{ uri: POST_OP_USER.avatarUri }}
+                      className="w-9 h-9 rounded-full mr-3 border border-gray-200"
+                    />
+                    <View className="flex-1">
+                      <View className="flex-row items-center gap-1.5">
+                        <Text className="text-sm font-semibold text-[#111827]">
+                          Jane
+                        </Text>
+                        <View className="bg-emerald-100 px-1.5 py-0.5 rounded-full">
+                          <Text className="text-[9px] font-bold text-emerald-800 uppercase">
+                            Post-Op
+                          </Text>
+                        </View>
+                      </View>
                       <Text className="text-xs text-[#6B7280] mt-0.5">
-                        Shared accountability
+                        Knee Replacement • Day 6 Rehab
                       </Text>
                     </View>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+                  {user?.id === POST_OP_USER.id ? (
+                    <Ionicons name="checkmark-circle" size={20} color="#3B49DF" />
+                  ) : (
+                    <Ionicons name="radio-button-off" size={18} color="#9CA3AF" />
+                  )}
                 </TouchableOpacity>
               </View>
 

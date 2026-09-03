@@ -14,6 +14,7 @@ import {
 } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { getBackendUrl } from '@/services/api';
+import { useAuthStore } from '@/stores/useAuthStore';
 
 // Web Speech Recognition typing
 declare global {
@@ -200,10 +201,19 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       transcript: '',
     });
 
-    const warmGreeting =
-      "Hey Sarah! How are you doing today? Ready to continue your recovery session?";
+    const currentUser = useAuthStore.getState().user;
+    const patientName = currentUser?.name || 'there';
+    const isPostOp = currentUser?.phase === 'post-op';
 
-    console.log('🎙️ [VoiceStore] Voice conversation activated — Amy speaking greeting');
+    const warmGreeting = isPostOp
+      ? `Hey ${patientName}! How is your knee feeling today? Ready to take on today's rehab exercises together?`
+      : `Hey ${patientName}! How are you doing today? Ready to continue your knee preparation?`;
+
+    const voiceQuickReplies = isPostOp
+      ? ["A little stiff today 🩹", "Exercises went well! 💪", "How is my progress? 📈"]
+      : ["I'm doing well! 😊", "Feeling a bit sore today 🥱", "What's on my plan? 📋"];
+
+    console.log('🎙️ [VoiceStore] Voice conversation activated — Amy speaking greeting to', patientName);
 
     // addIncomingMessage will trigger speakAndThenListen(warmGreeting)
     import('@/stores/useChatStore').then(({ useChatStore }) => {
@@ -214,7 +224,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         sender: 'coach',
         text: warmGreeting,
         timestamp: timeString,
-        quickReplies: ["I'm doing well! 😊", "Feeling a bit sore today", "What's on my plan?"],
+        quickReplies: voiceQuickReplies,
       });
     }).catch(() => {
       get().speakAndThenListen(warmGreeting);

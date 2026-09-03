@@ -34,7 +34,7 @@ if SENTRY_DSN:
         traces_sample_rate=1.0 if SENTRY_ENV == "development" else 0.2,
         profiles_sample_rate=0.2,
         send_default_pii=False,
-    )
+    ) 
     print(f"🛡️ [Sentry] Server monitoring active in '{SENTRY_ENV}' mode.")
 
 # Initialize async Socket.IO server with ping timeout safeguards

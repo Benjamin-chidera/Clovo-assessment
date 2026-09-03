@@ -20,7 +20,7 @@ export default function ChatScreen() {
     } else {
       const patientId = user?.id || 'patient-sarah';
       socketService.connect(patientId);
-      fetchMessages();
+      fetchMessages(patientId);
     }
   }, [isAuthenticated, user?.id]);
 

@@ -28,6 +28,7 @@ class Patient(SQLModel, table=True):
         default="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80"
     )
     plan: Optional[str] = Field(default="Pre-Op Preparation")
+    phase: Optional[str] = Field(default="pre-op", description="Clinical phase: pre-op or post-op")
     streak_count: int = Field(default=0)
     last_active_date: Optional[date] = Field(default=None, description="Last date patient completed a task or checked in")
     total_completed_tasks: int = Field(default=0, description="Total lifetime completed tasks")
@@ -52,10 +53,12 @@ class UserProfileData(SQLModel):
     email: Optional[str] = None
     avatar_uri: Optional[str] = None
     plan: Optional[str] = None
+    phase: Optional[str] = "pre-op"
     streak_count: int = 0
     greeting: str
     surgery_title: str
     days_away: int
+    days_post_op: Optional[int] = None
     procedure_name: Optional[str] = None
     procedure_date: Optional[datetime] = None
     milestones: List[MilestoneDTO] = Field(default_factory=list)
@@ -71,6 +74,8 @@ class PatientHomeData(SQLModel):
     patient_name: str
     surgery_title: str
     days_away: int
+    days_post_op: Optional[int] = None
+    phase: Optional[str] = "pre-op"
     procedure_name: Optional[str] = None
     procedure_date: Optional[datetime] = None
     streak_count: int = 0

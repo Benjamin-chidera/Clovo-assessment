@@ -18,10 +18,12 @@ export interface UserProfileResponse {
   email?: string;
   avatar_uri?: string;
   plan?: string;
+  phase?: string;
   streak_count: number;
   greeting: string;
   surgery_title: string;
   days_away: number;
+  days_post_op?: number;
   procedure_name?: string;
   procedure_date?: string;
   milestones?: MilestoneResponse[];
@@ -54,6 +56,8 @@ export interface HomeDataResponse {
   patient_name: string;
   surgery_title: string;
   days_away: number;
+  days_post_op?: number;
+  phase?: string;
   procedure_name?: string;
   procedure_date?: string;
   streak_count?: number;

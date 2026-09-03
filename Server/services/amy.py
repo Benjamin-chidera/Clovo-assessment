@@ -170,6 +170,8 @@ class CoachState(TypedDict):
     patient_name: str
     procedure_name: str
     days_away: Optional[int]
+    days_post_op: Optional[int]
+    phase: Optional[str]
     user_message: str
     conversation_history: List[Dict[str, str]]
     grounded_library_text: str
@@ -630,8 +632,27 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
     is_unmark = state.get("is_task_unmark", False)
     unmarked_activity = state.get("unmarked_activity_name")
     should_show_options = state.get("should_show_options", False)
+    phase = state.get("phase", "pre-op")
+    days_post_op = state.get("days_post_op")
+    is_post_op = (phase == "post-op") or (days_post_op is not None)
 
-    time_context = f"in {days} days" if days is not None else "in your recovery journey"
+    if is_post_op:
+        time_context = f"Day {days_post_op or 6} Post-Op"
+        patient_profile_line = f"Patient Profile: {name} (Recovering from {procedure}, {time_context} - Post-Op Rehabilitation)."
+        clinical_guidance_line = (
+            "CLINICAL POST-OPERATIVE REHABILITATION RULES:\n"
+            "- The patient has completed surgery and is in active rehabilitation.\n"
+            "- Emphasize gentle range of motion (heel slides), ankle pumps and elevation for swelling and blood clot (DVT) prevention, ice protocol, and safe crutch mobility.\n"
+            "- Remind the patient to listen to their body and NEVER push through sharp surgical pain."
+        )
+    else:
+        time_context = f"in {days} days" if days is not None else "in your recovery journey"
+        patient_profile_line = f"Patient Profile: {name} (Preparing for {procedure} {time_context} - Pre-Op Preparation)."
+        clinical_guidance_line = (
+            "CLINICAL PRE-OPERATIVE PREPARATION RULES:\n"
+            "- The patient is preparing for scheduled surgery.\n"
+            "- Emphasize quad strengthening (quad sets), anxiety management (4-7-8 breathing), nutrition, and surgical readiness."
+        )
 
     # Detect low mood, sadness, fatigue, or low motivation
     low_mood_signals = [
@@ -648,7 +669,7 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
         event_instruction = (
             f"EVENT: The patient has confirmed completing their routine: '{completed_task_name}'.\n"
             f"INSTRUCTIONS: Enthusiastically celebrate their achievement in 2-3 warm, clear sentences. "
-            f"Explain how completing {completed_task_name} helps their surgical recovery, and ask how they're feeling or suggest their next step."
+            f"Explain how completing {completed_task_name} helps their recovery, and ask how they're feeling or suggest their next step."
         )
     elif is_unmark and unmarked_activity:
         event_instruction = (
@@ -662,7 +683,7 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
             f"EVENT: The patient expressed sadness, low energy, or low motivation ('{user_msg}').\n"
             f"INSTRUCTIONS: Respond as a deeply caring, empathetic, and human-like recovery coach in 2-3 warm sentences:\n"
             f"1. Warmly validate and normalize their feelings: reassure {name} that recovery is emotionally demanding with ups and downs, and feeling sad, tired, or unmotivated is completely natural and valid.\n"
-            f"2. Remove all pressure or guilt: reassure them that resting and mental wellbeing are just as critical for surgical healing as physical exercises.\n"
+            f"2. Remove all pressure or guilt: reassure them that resting and mental wellbeing are just as critical for healing as physical exercises.\n"
             f"3. Offer a gentle, restorative option: suggest taking today as a guilt-free restorative rest day, or trying just 2 minutes of gentle 4-7-8 breathing if they want a soothing moment.\n"
             f"4. Reassure them: 'I'm right here with you, {name}. No pressure at all. 💙'"
         )
@@ -687,7 +708,8 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
     if llm:
         try:
             prompt_context = (
-                f"Patient Profile: {name} (Preparing for {procedure} {time_context}).\n\n"
+                f"{patient_profile_line}\n\n"
+                f"{clinical_guidance_line}\n\n"
                 f"Today's Assigned Daily Tasks & Real-Time Statuses (Updated Live):\n{daily_tasks}\n"
                 f"{adherence_prompt_line}"
                 f"{milestone_prompt_line}\n"
@@ -725,16 +747,16 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
                     "completed_task_info": state.get("completed_task_info"),
                 }
         except Exception as e:
-            print(f"⚠️ [LangChain LLM Unified Coaching Fallback] {e}")
+            print(f"⚠️ [LangGraph CoachingNode] LLM error, using grounded fallback: {e}")
 
     # 3. Deterministic Grounded Fallbacks (if LLM is unavailable or fails)
     if is_completion and completed_task_name:
         response_text = (
-            f"Awesome job, {name}! 🎉 I've marked {completed_task_name} as completed in your daily recovery checklist. "
-            f"Every bit of preparation strengthens your body and brings you one step closer to a smooth {procedure} recovery 💙. "
-            "How are you feeling right now?"
+            f"Fantastic job completing your {completed_task_name}, {name}! 🎉 "
+            f"Staying consistent with your routines helps restore joint mobility and strengthens your recovery every single day. "
+            "How does your knee feel after doing that?"
         )
-        quick_replies = ["Feeling good! 😊", "A bit tired but okay 👍", "What's my next task? 📋"]
+        quick_replies = ["Feeling great! 😊", "A bit tired 🥱", "Show my next task 📋"]
     elif is_unmark and unmarked_activity:
         response_text = (
             f"No problem at all, {name}! 💙 I've reset {unmarked_activity} to pending on your daily checklist. "
@@ -756,13 +778,22 @@ def coaching_node(state: CoachState) -> Dict[str, Any]:
         )
         quick_replies = ["Let's start! 💪", "Tell me more about Quad Sets", "Surprise me! 🎁"]
     else:
-        time_msg = f"With your {procedure} {days} days away, consistent" if days is not None else f"For your {procedure} preparation, consistent"
-        response_text = (
-            f"Hello {name}! I'm here to support and guide your recovery journey. "
-            f"{time_msg} pre-operative preparation builds joint stability and smooths post-op recovery. "
-            "What can I help you with today? 🌟"
-        )
-        quick_replies = ["What is the point of quad sets? 💡", "Show me today's routine 🗓", "Surprise me! 🎁"]
+        if is_post_op:
+            response_text = (
+                f"Hello {name}! I'm here to support your knee rehabilitation. "
+                f"You are on Day {days_post_op or 6} of your recovery journey! "
+                "Managing swelling and taking gentle steps builds strength every day. "
+                "How is your knee feeling right now? 🌟"
+            )
+            quick_replies = ["What's my rehab plan today? 📋", "My knee feels a bit stiff 🦵", "How long should I ice? 🧊", "I did my ankle pumps! ✅"]
+        else:
+            time_msg = f"With your {procedure} {days} days away, consistent" if days is not None else f"For your {procedure} preparation, consistent"
+            response_text = (
+                f"Hello {name}! I'm here to support and guide your recovery journey. "
+                f"{time_msg} pre-operative preparation builds joint stability and smooths post-op recovery. "
+                "What can I help you with today? 🌟"
+            )
+            quick_replies = ["What is the point of quad sets? 💡", "Show me today's routine 🗓", "Surprise me! 🎁"]
 
     return {
         "response_text": clean_plain_text(response_text),
@@ -893,14 +924,23 @@ class AmyCoachService:
             except Exception as e:
                 print(f"⚠️ [Langfuse Trace Update Error]: {e}")
 
+        is_post_op = (getattr(patient, "phase", None) == "post-op") or (patient.plan and "post-op" in patient.plan.lower())
         days_away: Optional[int] = None
+        days_post_op: Optional[int] = None
         if patient.procedure_date:
             now = datetime.now(timezone.utc)
             proc_date = patient.procedure_date
             if proc_date.tzinfo is None:
                 proc_date = proc_date.replace(tzinfo=timezone.utc)
-            days_diff = (proc_date.date() - now.date()).days
-            days_away = max(0, days_diff)
+            if is_post_op:
+                days_diff = (now.date() - proc_date.date()).days
+                days_post_op = max(1, days_diff)
+                days_away = 0
+            else:
+                days_diff = (proc_date.date() - now.date()).days
+                days_away = max(0, days_diff)
+        elif is_post_op:
+            days_post_op = 6
 
         # 1. Build grounded clinical knowledge library text
         all_content = session.exec(select(ClinicalContent)).all()
@@ -994,6 +1034,8 @@ class AmyCoachService:
             "patient_name": patient.name or "Sarah",
             "procedure_name": patient.procedure or "Knee Surgery",
             "days_away": days_away,
+            "days_post_op": days_post_op,
+            "phase": "post-op" if is_post_op else "pre-op",
             "user_message": user_message,
             "conversation_history": conversation_history,
             "grounded_library_text": grounded_library_text,

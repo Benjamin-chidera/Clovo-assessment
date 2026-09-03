@@ -14,16 +14,18 @@ import { useTaskStore } from '@/stores/useTaskStore';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { isAuthenticated, openProfileModal } = useAuthStore();
+  const { isAuthenticated, user, openProfileModal } = useAuthStore();
   const { fetchUser } = useUserStore();
   const { fetchTasks } = useTaskStore();
 
   const { isConnected } = useSocketStore();
 
   useEffect(() => {
-    fetchUser();
-    fetchTasks();
-  }, [fetchUser, fetchTasks]);
+    if (user?.id) {
+      fetchUser(user.id);
+      fetchTasks(user.id);
+    }
+  }, [user?.id, fetchUser, fetchTasks]);
 
   useEffect(() => {
     if (!isAuthenticated) {

@@ -93,6 +93,134 @@ class PatientService:
 
         return patient
 
+    @staticmethod
+    def get_or_create_post_op_patient(session: Session) -> Patient:
+        """
+        Retrieves or seeds the post-op patient (Jane) who recently completed knee replacement surgery
+        (6 days ago) and is actively participating in rehabilitation.
+        """
+        patient = PatientService.get_patient_by_name(session, "Jane")
+        if not patient:
+            now = datetime.now(timezone.utc)
+            procedure_date = now - timedelta(days=6)
+
+            patient = Patient(
+                name="Jane",
+                email="jane@clovo.app",
+                avatar_uri="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80",
+                plan="Post-Op Rehabilitation",
+                phase="post-op",
+                streak_count=4,
+                last_active_date=date.today(),
+                total_completed_tasks=5,
+                age=42,
+                pathway="Post-Op Orthopedic Rehab",
+                procedure="Knee Replacement",
+                procedure_date=procedure_date,
+                preferences="Focusing on knee swelling reduction, range of motion flexion, and crutch walking",
+            )
+            session.add(patient)
+            session.commit()
+            session.refresh(patient)
+
+            # Seed post-op recommendations
+            initial_recommendations = [
+                Recommendation(
+                    patient_id=patient.id,
+                    content_id=8,
+                    duration_minutes=10,
+                    repetitions=20,
+                    scheduled_date=date.today(),
+                    status="active",
+                    completed_at=None,
+                    notes="Recommended 3x daily with leg elevated",
+                ),
+                Recommendation(
+                    patient_id=patient.id,
+                    content_id=9,
+                    duration_minutes=10,
+                    repetitions=10,
+                    scheduled_date=date.today(),
+                    status="active",
+                    completed_at=None,
+                    notes="Gentle range-of-motion to comfortable tension",
+                ),
+                Recommendation(
+                    patient_id=patient.id,
+                    content_id=10,
+                    duration_minutes=20,
+                    repetitions=None,
+                    scheduled_date=date.today(),
+                    status="active",
+                    completed_at=None,
+                    notes="Apply cold pack after walking or exercises",
+                ),
+                Recommendation(
+                    patient_id=patient.id,
+                    content_id=11,
+                    duration_minutes=10,
+                    repetitions=None,
+                    scheduled_date=date.today(),
+                    status="active",
+                    completed_at=None,
+                    notes="Gentle walking with crutches on flat surface",
+                ),
+            ]
+            for rec in initial_recommendations:
+                session.add(rec)
+            session.commit()
+
+            # Unlock initial circulation hero milestone for Jane
+            pm = PatientMilestone(
+                patient_id=patient.id,
+                milestone_id=8,
+                unlocked_at=datetime.now(timezone.utc),
+            )
+            session.add(pm)
+            session.commit()
+
+        # Unlock milestones strictly earned by real completed tasks and streak
+        PatientService.check_and_unlock_milestones(session, patient.id)
+
+        return patient
+
+    @staticmethod
+    def seed_default_patients(session: Session) -> Tuple[Patient, Patient]:
+        """Ensures both Sarah (pre-op) and Jane (post-op) exist in the database."""
+        sarah = PatientService.get_or_create_default_patient(session)
+        jane = PatientService.get_or_create_post_op_patient(session)
+        return sarah, jane
+
+    @staticmethod
+    def resolve_patient(session: Session, identifier: Any = None) -> Patient:
+        """
+        Resolves a patient from any identifier (ID integer, string ID, name, or token).
+        Supports:
+          - 1, '1', 'patient-sarah', 'sarah' -> Sarah (Pre-Op)
+          - 2, '2', 'patient-jane', 'jane' -> Jane (Post-Op)
+        """
+        if identifier is None:
+            return PatientService.get_or_create_default_patient(session)
+
+        id_str = str(identifier).strip().lower()
+
+        if "jane" in id_str or id_str == "2":
+            jane = PatientService.get_patient_by_name(session, "Jane")
+            if not jane:
+                jane = PatientService.get_or_create_post_op_patient(session)
+            return jane
+
+        if id_str.isdigit():
+            pid = int(id_str)
+            p = session.get(Patient, pid)
+            if p:
+                return p
+
+        sarah = PatientService.get_patient_by_name(session, "Sarah")
+        if not sarah:
+            sarah = PatientService.get_or_create_default_patient(session)
+        return sarah
+
 
 
     @staticmethod
@@ -295,24 +423,33 @@ class PatientService:
         """
         Retrieves formatted user profile for the current/selected patient from the database.
         """
-        patient: Optional[Patient] = None
-        if patient_id:
-            patient = PatientService.get_patient_by_id(session, patient_id)
-
-        if not patient:
-            patient = PatientService.get_or_create_default_patient(session)
+        patient = PatientService.resolve_patient(session, patient_id)
 
         # Audit adherence on profile fetch
         PatientService.audit_daily_adherence_and_missed_tasks(session, patient.id)
 
-        days_away = 21
+        is_post_op = (patient.phase == "post-op") or (patient.plan and "post-op" in patient.plan.lower())
+        days_away = 0
+        days_post_op: Optional[int] = None
+        surgery_title = "Your surgery"
+
         if patient.procedure_date:
             now = datetime.now(timezone.utc)
             proc_date = patient.procedure_date
             if proc_date.tzinfo is None:
                 proc_date = proc_date.replace(tzinfo=timezone.utc)
-            days_diff = (proc_date.date() - now.date()).days
-            days_away = max(0, days_diff)
+            
+            if is_post_op:
+                days_diff = (now.date() - proc_date.date()).days
+                days_post_op = max(1, days_diff)
+                surgery_title = f"Day {days_post_op} Post-Op"
+            else:
+                days_diff = (proc_date.date() - now.date()).days
+                days_away = max(0, days_diff)
+                surgery_title = "Your surgery"
+        elif is_post_op:
+            surgery_title = "Recovery Day"
+            days_post_op = 6
 
         current_hour = datetime.now().hour
         time_greeting = "Good morning" if current_hour < 12 else "Good afternoon" if current_hour < 17 else "Good evening"
@@ -324,12 +461,14 @@ class PatientService:
             name=patient.name,
             email=patient.email or f"{patient.name.lower()}@clovo.app",
             avatar_uri=patient.avatar_uri,
-            plan=patient.plan or "Pre-Op Preparation",
-            streak_count=patient.streak_count if patient.streak_count is not None else 5,
+            plan=patient.plan or ("Post-Op Rehabilitation" if is_post_op else "Pre-Op Preparation"),
+            phase="post-op" if is_post_op else "pre-op",
+            streak_count=patient.streak_count if patient.streak_count is not None else 4,
             greeting=f"{time_greeting}, {patient.name}",
-            surgery_title="Your surgery",
+            surgery_title=surgery_title,
             days_away=days_away,
-            procedure_name=patient.procedure or "Knee Surgery",
+            days_post_op=days_post_op,
+            procedure_name=patient.procedure or ("Knee Replacement" if is_post_op else "Knee Surgery"),
             procedure_date=patient.procedure_date,
             milestones=milestones_dto,
             additional_milestones_count=additional_count,
@@ -337,29 +476,38 @@ class PatientService:
         )
 
     @staticmethod
-    def get_patient_home_data(session: Session, patient_id: Optional[int] = None) -> PatientHomeData:
+    def get_patient_home_data(session: Session, patient_id: Any = None) -> PatientHomeData:
         """
         Calculates and returns home page dashboard data with joined clinical content details,
         unlocked milestone badges, and live adherence metrics.
         """
-        patient: Optional[Patient] = None
-        if patient_id:
-            patient = PatientService.get_patient_by_id(session, patient_id)
-
-        if not patient:
-            patient = PatientService.get_or_create_default_patient(session)
+        patient = PatientService.resolve_patient(session, patient_id)
 
         # Audit adherence on home fetch
         PatientService.audit_daily_adherence_and_missed_tasks(session, patient.id)
 
-        days_away = 21
+        is_post_op = (patient.phase == "post-op") or (patient.plan and "post-op" in patient.plan.lower())
+        days_away = 0
+        days_post_op: Optional[int] = None
+        surgery_title = "Your surgery"
+
         if patient.procedure_date:
             now = datetime.now(timezone.utc)
             proc_date = patient.procedure_date
             if proc_date.tzinfo is None:
                 proc_date = proc_date.replace(tzinfo=timezone.utc)
-            days_diff = (proc_date.date() - now.date()).days
-            days_away = max(0, days_diff)
+
+            if is_post_op:
+                days_diff = (now.date() - proc_date.date()).days
+                days_post_op = max(1, days_diff)
+                surgery_title = f"Day {days_post_op} Post-Op"
+            else:
+                days_diff = (proc_date.date() - now.date()).days
+                days_away = max(0, days_diff)
+                surgery_title = "Your surgery"
+        elif is_post_op:
+            surgery_title = "Recovery Day"
+            days_post_op = 6
 
         current_hour = datetime.now().hour
         time_greeting = "Good morning" if current_hour < 12 else "Good afternoon" if current_hour < 17 else "Good evening"
@@ -396,11 +544,13 @@ class PatientService:
         return PatientHomeData(
             greeting=greeting,
             patient_name=patient.name,
-            surgery_title="Your surgery",
+            surgery_title=surgery_title,
             days_away=days_away,
-            procedure_name=patient.procedure,
+            days_post_op=days_post_op,
+            phase="post-op" if is_post_op else "pre-op",
+            procedure_name=patient.procedure or ("Knee Replacement" if is_post_op else "Knee Surgery"),
             procedure_date=patient.procedure_date,
-            streak_count=patient.streak_count if patient.streak_count is not None else 5,
+            streak_count=patient.streak_count if patient.streak_count is not None else 4,
             milestones=milestones_dto,
             additional_milestones_count=additional_count,
             total_completed_tasks=patient.total_completed_tasks or len(milestones_dto),
