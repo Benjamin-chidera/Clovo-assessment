@@ -551,7 +551,7 @@ def recommendation_action_node(state: CoachState) -> Dict[str, Any]:
             for rec in reset_recs:
                 print(f"🔄 [LangGraph TaskAction] Recommendation #{rec.id} RESET to ACTIVE for patient {patient_id}")
 
-    # 3. Refresh live task statuses in state if mutation occurred
+    # 3. Refresh live task statuses and available options in state if mutation occurred
     updates: Dict[str, Any] = {"completed_task_info": completed_task_info}
     if completed_task_info:
         rec_statement = (
@@ -563,6 +563,7 @@ def recommendation_action_node(state: CoachState) -> Dict[str, Any]:
         rec_results = session.exec(rec_statement).all()
         task_status_lines = []
         active_recs = []
+        available_options = []
         for rec, c in rec_results:
             is_comp = (rec.status == "completed")
             status_lbl = "COMPLETED ✅" if is_comp else "PENDING ⏳"
@@ -574,8 +575,33 @@ def recommendation_action_node(state: CoachState) -> Dict[str, Any]:
                     "type": c.type,
                     "duration": rec.duration_minutes,
                 })
+
+            available_options.append({
+                "id": f"content-{c.id}",
+                "recommendationId": rec.id,
+                "title": c.title,
+                "subtitle": c.description,
+                "durationMinutes": rec.duration_minutes,
+                "durationLabel": f"{rec.duration_minutes} minutes",
+                "intensity": "Low" if c.type in ["mindfulness", "nutrition"] else "Medium",
+                "imageUri": c.image_url,
+                "tag": c.type.capitalize(),
+                "isCompleted": is_comp,
+            })
+
+        # Preserve the surprise card option
+        available_options.append({
+            "id": "content-surprise",
+            "title": "Surprise Me! 🎁",
+            "subtitle": "Let's See What You Get",
+            "imageUri": "https://images.unsplash.com/photo-1513885535751-8b9238bd345a?auto=format&fit=crop&w=300&q=80",
+            "isSpecial": True,
+            "isCompleted": False,
+        })
+
         updates["daily_tasks_summary"] = "\n".join(task_status_lines)
         updates["active_recommendations"] = active_recs
+        updates["available_options"] = available_options
 
     return updates
 

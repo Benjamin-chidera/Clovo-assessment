@@ -186,10 +186,36 @@ class PatientService:
 
     @staticmethod
     def seed_default_patients(session: Session) -> Tuple[Patient, Patient]:
-        """Ensures both Sarah (pre-op) and Jane (post-op) exist in the database."""
+        """Ensures both Sarah (pre-op) and Jane (post-op) exist in the database and have active tasks for today."""
         sarah = PatientService.get_or_create_default_patient(session)
         jane = PatientService.get_or_create_post_op_patient(session)
+
+        # Ensure active daily tasks are scheduled for today if they expired in the past
+        today = date.today()
+        for patient in (sarah, jane):
+            recs = session.exec(
+                select(Recommendation).where(Recommendation.patient_id == patient.id)
+            ).all()
+            for r in recs:
+                if r.status != "completed" and r.scheduled_date < today:
+                    r.scheduled_date = today
+                    r.status = "active"
+                    session.add(r)
+        session.commit()
+
         return sarah, jane
+
+    @staticmethod
+    def get_completed_tasks_count(session: Session, patient_id: Any) -> int:
+        """Returns the number of completed recommendations for a patient."""
+        patient = PatientService.resolve_patient(session, patient_id)
+        count = session.exec(
+            select(Recommendation).where(
+                Recommendation.patient_id == patient.id,
+                Recommendation.status == "completed"
+            )
+        ).all()
+        return len(count)
 
     @staticmethod
     def resolve_patient(session: Session, identifier: Any = None) -> Patient:

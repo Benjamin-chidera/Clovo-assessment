@@ -128,9 +128,10 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
                     milestones, add_count = patient_service.get_patient_milestones(db_session, p.id)
                     streak = p.streak_count if p else 0
                     m_dump = [m.model_dump() for m in milestones]
-                    return streak, m_dump, add_count
+                    completed_count = patient_service.get_completed_tasks_count(db_session, p.id)
+                    return streak, m_dump, add_count, completed_count
 
-            streak_count, milestones_data, add_count = await asyncio.to_thread(_get_stats)
+            streak_count, milestones_data, add_count, completed_count = await asyncio.to_thread(_get_stats)
 
             for task_info in task_list:
                 task_id = task_info.get("taskId")
@@ -140,12 +141,14 @@ def register_socket_events(sio: socketio.AsyncServer) -> None:
                 await sio.emit("task_sync", {
                     "taskId": task_id,
                     "isCompleted": is_comp,
+                    "completedCount": completed_count,
                     "streakCount": streak_count,
                     "milestones": milestones_data,
                     "additionalMilestonesCount": add_count,
                 }, to=f"user_{user_id}")
 
             await sio.emit("user_stats_updated", {
+                "completedCount": completed_count,
                 "streakCount": streak_count,
                 "milestones": milestones_data,
                 "additionalMilestonesCount": add_count,

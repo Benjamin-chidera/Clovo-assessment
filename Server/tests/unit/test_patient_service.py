@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from sqlmodel import Session, select
 from models.patient import Patient
 from models.recommendation import Recommendation
+from models.clinical_content import ClinicalContent
 from services.patient_service import patient_service
 
 
@@ -103,4 +104,33 @@ class TestPatientService:
         post_op_titles = [prep.title for prep in home_data.preparations]
         assert any("Ankle Pumps" in t for t in post_op_titles)
         assert any("Heel Slides" in t for t in post_op_titles)
+
+    def test_mark_task_completed_recovers_missed_status(self, db_session: Session):
+        """SRV-UNIT-PAT-007: Completing an activity that was marked 'missed' transitions it to 'completed'."""
+        from services.recommendation_service import recommendation_service
+
+        sarah = patient_service.get_or_create_default_patient(db_session)
+        # Find recommendation for 4-7-8 Breathing and simulate past missed status
+        rec_statement = (
+            select(Recommendation, ClinicalContent)
+            .join(ClinicalContent, Recommendation.content_id == ClinicalContent.id)
+            .where(Recommendation.patient_id == sarah.id)
+        )
+        results = db_session.exec(rec_statement).all()
+        target_rec = next((r for r, c in results if "breathing" in c.title.lower()), None)
+        assert target_rec is not None
+
+        target_rec.status = "missed"
+        db_session.add(target_rec)
+        db_session.commit()
+
+        # Mark completed via recommendation_service
+        updated = recommendation_service.mark_task_completed(
+            db_session,
+            patient_id=sarah.id,
+            activity_name="4-7-8 Breathing",
+        )
+        assert updated is not None
+        assert updated.status == "completed"
+        assert updated.completed_at is not None
 

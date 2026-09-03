@@ -162,15 +162,16 @@ class RecommendationService:
                 patient_service.update_streak_on_task_completion(session, patient_id)
                 return rec
 
-        # 2. Match by activity name / keywords in ClinicalContent
+        # 2. Match by activity name / keywords in ClinicalContent (allow 'active' or 'missed' status)
         if activity_name:
             statement = (
                 select(Recommendation, ClinicalContent)
                 .join(ClinicalContent, Recommendation.content_id == ClinicalContent.id)
                 .where(
                     Recommendation.patient_id == patient_id,
-                    Recommendation.status == "active"
+                    Recommendation.status != "completed"
                 )
+                .order_by(Recommendation.scheduled_date.desc())
             )
             results = session.exec(statement).all()
 
@@ -189,6 +190,10 @@ class RecommendationService:
                     or ("breath" in act_lower and "breath" in c_title)
                     or ("stretch" in act_lower and "stretch" in c_title)
                     or ("walk" in act_lower and "walk" in c_title)
+                    or ("pump" in act_lower and "pump" in c_title)
+                    or ("heel" in act_lower and "heel" in c_title)
+                    or ("slide" in act_lower and "slide" in c_title)
+                    or ("ice" in act_lower and "ice" in c_title)
                 ):
                     rec.status = "completed"
                     rec.completed_at = datetime.now(timezone.utc)
@@ -198,10 +203,13 @@ class RecommendationService:
                     patient_service.update_streak_on_task_completion(session, patient_id)
                     return rec
 
-        # 3. Fallback: Mark the first active recommendation for this patient
+        # 3. Fallback: Mark the first non-completed recommendation for this patient
         statement = (
             select(Recommendation)
-            .where(Recommendation.patient_id == patient_id, Recommendation.status == "active")
+            .where(
+                Recommendation.patient_id == patient_id,
+                Recommendation.status != "completed"
+            )
             .order_by(Recommendation.scheduled_date.asc())
         )
         rec = session.exec(statement).first()
@@ -214,8 +222,7 @@ class RecommendationService:
             patient_service.update_streak_on_task_completion(session, patient_id)
             return rec
 
-
-        # 4. Fallback: Return matching task even if already completed
+        # 4. Fallback: Return matching task (marking it completed if not already)
         if activity_name:
             all_recs = session.exec(
                 select(Recommendation, ClinicalContent)
@@ -235,7 +242,18 @@ class RecommendationService:
                     or ("breath" in act_lower and "breath" in c_title)
                     or ("stretch" in act_lower and "stretch" in c_title)
                     or ("walk" in act_lower and "walk" in c_title)
+                    or ("pump" in act_lower and "pump" in c_title)
+                    or ("heel" in act_lower and "heel" in c_title)
+                    or ("slide" in act_lower and "slide" in c_title)
+                    or ("ice" in act_lower and "ice" in c_title)
                 ):
+                    if rec.status != "completed":
+                        rec.status = "completed"
+                        rec.completed_at = datetime.now(timezone.utc)
+                        session.add(rec)
+                        session.commit()
+                        session.refresh(rec)
+                        patient_service.update_streak_on_task_completion(session, patient_id)
                     return rec
 
         return None
