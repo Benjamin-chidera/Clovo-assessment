@@ -11,9 +11,9 @@ interface MilestoneCardProps {
 export const MilestoneCard: React.FC<MilestoneCardProps> = ({ onPress }) => {
   const { surgeryTitle, daysAway, daysPostOp, phase, procedureName } = useUserStore();
 
-  const isPostOp = phase === 'post-op' || daysPostOp !== undefined;
+  const isPostOp = phase === 'post-op';
   const displayTitle = isPostOp ? 'Post-Op Rehabilitation' : surgeryTitle;
-  const headline = isPostOp ? `Day ${daysPostOp || 6} Post-Op` : `${daysAway} days away`;
+  const headline = isPostOp ? `Day ${daysPostOp ?? 6} Post-Op` : `${daysAway} days away`;
   const pathwaySubtitle = isPostOp
     ? `${procedureName} Recovery Pathway`
     : `${procedureName} Preparation Pathway`;

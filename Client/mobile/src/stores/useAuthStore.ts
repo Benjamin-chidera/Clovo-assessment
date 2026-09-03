@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useSocketStore } from '@/stores/useSocketStore';
+import { useUserStore } from '@/stores/useUserStore';
 
 export interface AuthUser {
   id: string;
@@ -54,6 +55,20 @@ export const useAuthStore = create<AuthState>((set) => ({
     // Initiate Socket.IO connection immediately upon login
     useSocketStore.getState().connect(selectedUser.id);
 
+    // Immediately sync user store to prevent stale UI
+    useUserStore.setState({
+      id: selectedUser.id,
+      name: selectedUser.name,
+      email: selectedUser.email,
+      avatarUri: selectedUser.avatarUri,
+      plan: selectedUser.plan,
+      phase: selectedUser.phase,
+      procedureName: selectedUser.procedureName,
+      surgeryTitle: selectedUser.phase === 'post-op' ? 'Post-Op Rehabilitation' : 'Your surgery',
+      daysAway: selectedUser.phase === 'post-op' ? 0 : 21,
+      daysPostOp: selectedUser.phase === 'post-op' ? 6 : undefined,
+    });
+
     set({
       isAuthenticated: true,
       user: selectedUser,
@@ -65,6 +80,20 @@ export const useAuthStore = create<AuthState>((set) => ({
     // Reconnect socket to new user session
     useSocketStore.getState().disconnect();
     useSocketStore.getState().connect(selectedUser.id);
+
+    // Immediately sync user store to prevent stale UI
+    useUserStore.setState({
+      id: selectedUser.id,
+      name: selectedUser.name,
+      email: selectedUser.email,
+      avatarUri: selectedUser.avatarUri,
+      plan: selectedUser.plan,
+      phase: selectedUser.phase,
+      procedureName: selectedUser.procedureName,
+      surgeryTitle: selectedUser.phase === 'post-op' ? 'Post-Op Rehabilitation' : 'Your surgery',
+      daysAway: selectedUser.phase === 'post-op' ? 0 : 21,
+      daysPostOp: selectedUser.phase === 'post-op' ? 6 : undefined,
+    });
 
     set({
       user: selectedUser,
